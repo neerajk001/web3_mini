@@ -4,6 +4,8 @@ import { UserProvider } from './context/UserContext';
 import Header from './components/Header';
 import Footer from './components/Footer';
 import Landing from './pages/Landing';
+import SignIn from "./pages/SignIn"
+import SignUp from './pages/SignUp';
 import Marketplace from './pages/Marketplace';
 import AssetDetail from './pages/AssetDetail';
 import Upload from './pages/Upload';
@@ -22,6 +24,8 @@ function App() {
                 <Route path="/marketplace" element={<Marketplace />} />
                 <Route path="/asset/:id" element={<AssetDetail />} />
                 <Route path="/upload" element={<Upload />} />
+                <Route path="/signin" element={<SignIn />} />
+                <Route path="/signup" element={<SignUp />} />
                 <Route path="/profile" element={<Profile />} />
               </Routes>
             </main>

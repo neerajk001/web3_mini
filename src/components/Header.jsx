@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { formatAddress } from '../utils/helpers';
 import { useState } from 'react';
@@ -6,6 +6,7 @@ import { useState } from 'react';
 const Header = () => {
   const { address, connected, connect, disconnect, loading } = useWallet();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const navigate = useNavigate();
 
   const handleWalletClick = async () => {
     if (connected) {
@@ -42,19 +43,22 @@ const Header = () => {
                 Profile
               </Link>
             )}
-          </div>  
+          </div>
 
+          {/* Wallet Buttons */}
           {/* Wallet Buttons */}
           <div className="hidden md:flex items-center space-x-3">
             {!connected ? (
               <>
-                <button
-                  onClick={handleWalletClick}
-                  disabled={loading}
-                  className="text-white font-medium px-5 py-2 rounded-full hover:bg-white/10 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                {/* Sign In → Supabase */}
+                <Link
+                  to="/signin"
+                  className="text-white font-medium px-5 py-2 rounded-full hover:bg-white/10 transition-all"
                 >
-                  {loading ? 'Connecting...' : 'Sign in'}
-                </button>
+                  Sign in
+                </Link>
+
+                {/* Get Started → Wallet Connect */}
                 <button
                   onClick={handleWalletClick}
                   disabled={loading}
@@ -85,6 +89,7 @@ const Header = () => {
               </button>
             )}
           </div>
+
 
           {/* Mobile Menu Button */}
           <button
