@@ -2,11 +2,35 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import { formatAddress } from '../utils/helpers';
 import { useState } from 'react';
+import { supabase } from '../supabaseClient';
+import { useEffect } from 'react';
+
 
 const Header = () => {
   const { address, connected, connect, disconnect, loading } = useWallet();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [user, setUser] = useState(null);
+
   const navigate = useNavigate();
+
+  useEffect(() => {
+  // Get current session
+  supabase.auth.getSession().then(({ data }) => {
+    setUser(data.session?.user ?? null);
+  });
+
+  // Listen for auth changes
+  const { data: listener } = supabase.auth.onAuthStateChange(
+    (_event, session) => {
+      setUser(session?.user ?? null);
+    }
+  );
+
+  return () => {
+    listener.subscription.unsubscribe();
+  };
+}, []);
+
 
   const handleWalletClick = async () => {
     if (connected) {
@@ -15,6 +39,12 @@ const Header = () => {
       await connect();
     }
   };
+
+  const handleSignOut = async () => {
+  await supabase.auth.signOut();
+  navigate('/signin');
+};
+
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 px-4 py-4">
@@ -47,48 +77,58 @@ const Header = () => {
 
           {/* Wallet Buttons */}
           {/* Wallet Buttons */}
-          <div className="hidden md:flex items-center space-x-3">
-            {!connected ? (
-              <>
-                {/* Sign In → Supabase */}
-                <Link
-                  to="/signin"
-                  className="text-white font-medium px-5 py-2 rounded-full hover:bg-white/10 transition-all"
-                >
-                  Sign in
-                </Link>
+<div className="hidden md:flex items-center space-x-3">
+  {!connected ? (
+    <>
+      {/* Auth Button */}
+      {user ? (
+        <button
+          onClick={handleSignOut}
+          className="text-red-400 font-medium px-5 py-2 rounded-full hover:bg-white/10 transition-all"
+        >
+          Sign out
+        </button>
+      ) : (
+        <Link
+          to="/signin"
+          className="text-white font-medium px-5 py-2 rounded-full hover:bg-white/10 transition-all"
+        >
+          Sign in
+        </Link>
+      )}
 
-                {/* Get Started → Wallet Connect */}
-                <button
-                  onClick={handleWalletClick}
-                  disabled={loading}
-                  className="bg-lime-400 hover:bg-lime-500 text-black font-semibold px-6 py-2 rounded-full transition-all duration-200 shadow-lg shadow-lime-400/30 hover:shadow-lime-400/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                >
-                  {loading ? (
-                    <>
-                      <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
-                      <span>Connecting...</span>
-                    </>
-                  ) : (
-                    <>
-                      <span>Get Started</span>
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                      </svg>
-                    </>
-                  )}
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={handleWalletClick}
-                className="bg-lime-400 hover:bg-lime-500 text-black font-semibold px-6 py-2 rounded-full transition-all duration-200 shadow-lg shadow-lime-400/30 hover:shadow-lime-400/50 flex items-center space-x-2"
-              >
-                <div className="w-2 h-2 bg-green-600 rounded-full"></div>
-                <span>{formatAddress(address)}</span>
-              </button>
-            )}
-          </div>
+      {/* Wallet Connect */}
+      <button
+        onClick={handleWalletClick}
+        disabled={loading}
+        className="bg-lime-400 hover:bg-lime-500 text-black font-semibold px-6 py-2 rounded-full transition-all duration-200 shadow-lg shadow-lime-400/30 hover:shadow-lime-400/50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+      >
+        {loading ? (
+          <>
+            <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin"></div>
+            <span>Connecting...</span>
+          </>
+        ) : (
+          <>
+            <span>Get Started</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+            </svg>
+          </>
+        )}
+      </button>
+    </>
+  ) : (
+    <button
+      onClick={handleWalletClick}
+      className="bg-lime-400 hover:bg-lime-500 text-black font-semibold px-6 py-2 rounded-full transition-all duration-200 shadow-lg shadow-lime-400/30 hover:shadow-lime-400/50 flex items-center space-x-2"
+    >
+      <div className="w-2 h-2 bg-green-600 rounded-full"></div>
+      <span>{formatAddress(address)}</span>
+    </button>
+  )}
+</div>
+
 
 
           {/* Mobile Menu Button */}
