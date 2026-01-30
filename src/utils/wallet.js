@@ -14,21 +14,28 @@ export const connectWallet = async () => {
 
     const provider = new ethers.BrowserProvider(window.ethereum);
     const accounts = await provider.send('eth_requestAccounts', []);
-    
+
     if (accounts.length === 0) {
       throw new Error('No accounts found');
     }
 
     const signer = await provider.getSigner();
     const address = await signer.getAddress();
-    const balance = await provider.getBalance(address);
+    // const balance = await provider.getBalance(address);
+    let balance = null;
+    try {
+      balance = await provider.getBalance(address);
+    } catch {
+      balance = null; // avoid crashing connect
+    }
+
     const network = await provider.getNetwork();
 
     return {
       provider,
       signer,
       address,
-      balance: ethers.formatEther(balance),
+      balance: balance ? ethers.formatEther(balance) : null,
       chainId: network.chainId.toString(),
       connected: true,
     };

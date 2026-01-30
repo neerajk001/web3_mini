@@ -102,14 +102,20 @@ const Profile = () => {
   ];
 
   const stats = [
-    { label: 'Wallet Balance', value: `${balance || '0'} ETH`, icon: '💰' },
+{
+  label: 'Wallet Balance',
+  value: connected
+    ? `${Number(balance).toFixed(4)} ETH`
+    : 'Not connected',
+  icon: '💰',
+},
     { label: 'Owned NFTs', value: ownedAssets.length, icon: '🖼️' },
     { label: 'Listed Items', value: listedAssets.length, icon: '📋' },
     { label: 'Total Transactions', value: mockTransactions.length, icon: '📊' },
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
+    <div className="min-h-screen bg-gray-50 pt-24 pb-8">
       <div className="container mx-auto px-4">
         {/* Profile Header */}
         <div className="card p-8 mb-8">
