@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useWallet } from '../context/WalletContext';
 import Button from '../components/Button';
+import { uploadFileToPinata, uploadJSONToPinata } from '../utils/pinata';
+import { getContract } from '../utils/contract';
 
 const Upload = () => {
   const navigate = useNavigate();
@@ -38,39 +40,99 @@ const Upload = () => {
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+  e.preventDefault();
 
-    if (!connected) {
-      alert('Please connect your wallet first');
-      return;
-    }
+  if (!connected) {
+    alert('Please connect your wallet');
+    return;
+  }
 
-    // Validation
-    if (!formData.file) {
-      alert('Please select a file to upload');
-      return;
-    }
+  if (!formData.file || !formData.title || !formData.description) {
+    alert('Missing required fields');
+    return;
+  }
 
-    if (!formData.title || !formData.description || !formData.price) {
-      alert('Please fill in all required fields');
-      return;
-    }
+  try {
+    setLoading(true);
 
-    try {
-      setLoading(true);
+    // 1️⃣ Upload file to IPFS
+    const fileRes = await uploadFileToPinata(formData.file);
+    const fileCID = fileRes.IpfsHash;
+
+    // 2️⃣ Create metadata
+    const metadata = {
+      title: formData.title,
+      description: formData.description,
+      category: formData.category,
+      creator: address,
+      createdAt: new Date().toISOString(),
+      file: `ipfs://${fileCID}`,
+      price: formData.price,
+      rentPrice: formData.rentPrice || null,
+    };
+
+    // 3️⃣ Upload metadata to IPFS
+    const metaRes = await uploadJSONToPinata(metadata);
+    const metadataCID = metaRes.IpfsHash;
+
+    // 4️⃣ Call smart contract
+    const contract = await getContract();
+
+    const itemType =
+      formData.category === 'painting' ? 0 : 1; // enum mapping
+
+    const tx = await contract.registerArtwork(
+      itemType,
+      metadataCID
+    );
+
+    await tx.wait();
+
+    alert('Artwork successfully created 🎉');
+    navigate('/marketplace');
+
+  } catch (err) {
+    console.error(err);
+    alert('Upload failed. Check console.');
+  } finally {
+    setLoading(false);
+  }
+};
+
+  // const handleSubmit = async (e) => {
+  //   e.preventDefault();
+
+  //   if (!connected) {
+  //     alert('Please connect your wallet first');
+  //     return;
+  //   }
+
+  //   // Validation
+  //   if (!formData.file) {
+  //     alert('Please select a file to upload');
+  //     return;
+  //   }
+
+  //   if (!formData.title || !formData.description || !formData.price) {
+  //     alert('Please fill in all required fields');
+  //     return;
+  //   }
+
+  //   try {
+  //     setLoading(true);
       
-      // Simulate upload and minting process
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+  //     // Simulate upload and minting process
+  //     await new Promise((resolve) => setTimeout(resolve, 3000));
       
-      alert('NFT created successfully! Your asset has been minted and listed on the marketplace.');
-      navigate('/marketplace');
-    } catch (error) {
-      console.error('Upload failed:', error);
-      alert('Failed to create NFT. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  //     alert('NFT created successfully! Your asset has been minted and listed on the marketplace.');
+  //     navigate('/marketplace');
+  //   } catch (error) {
+  //     console.error('Upload failed:', error);
+  //     alert('Failed to create NFT. Please try again.');
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // };
 
   if (!connected) {
     return (
@@ -184,9 +246,6 @@ const Upload = () => {
                 <select name="category" value={formData.category} onChange={handleInputChange} className="input-field">
                   <option value="painting">Digital Painting</option>
                   <option value="research-paper">Research Paper</option>
-                  <option value="photo">Photography</option>
-                  <option value="music">Music</option>
-                  <option value="video">Video</option>
                 </select>
               </div>
             </div>
@@ -226,27 +285,6 @@ const Upload = () => {
                 />
                 <p className="text-sm text-gray-500 mt-1">Optional rental option</p>
               </div>
-            </div>
-          </div>
-
-          {/* Royalties */}
-          <div className="card p-6">
-            <h3 className="text-xl font-bold mb-4">Royalties</h3>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Creator Royalty (%)</label>
-              <input
-                type="number"
-                name="royalty"
-                value={formData.royalty}
-                onChange={handleInputChange}
-                placeholder="10"
-                min="0"
-                max="50"
-                className="input-field"
-              />
-              <p className="text-sm text-gray-500 mt-1">
-                You will receive {formData.royalty}% of the sale price on future secondary sales
-              </p>
             </div>
           </div>
 
