@@ -4,6 +4,7 @@ import { useWallet } from '../context/WalletContext';
 import Button from '../components/Button';
 import { uploadFileToPinata, uploadJSONToPinata } from '../utils/pinata';
 import { getContract } from '../utils/contract';
+import { ethers } from 'ethers';
 
 const Upload = () => {
   const navigate = useNavigate();
@@ -29,7 +30,7 @@ const Upload = () => {
     const file = e.target.files[0];
     if (file) {
       setFormData((prev) => ({ ...prev, file }));
-      
+
       // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -39,7 +40,7 @@ const Upload = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
+const handleSubmit = async (e) => {
   e.preventDefault();
 
   if (!connected) {
@@ -54,6 +55,47 @@ const Upload = () => {
 
   try {
     setLoading(true);
+
+    // Check if MetaMask is on correct network
+    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+    
+    // If not on Sepolia, try to switch networks
+    if (chainId !== '0xaa36a7') { // Sepolia chainId in hex
+      try {
+        // Try to switch to Sepolia
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: '0xaa36a7' }], // Sepolia
+        });
+      } catch (switchError) {
+        // This error code indicates that the chain has not been added to MetaMask
+        if (switchError.code === 4902) {
+          try {
+            // Add Sepolia network to MetaMask
+            await window.ethereum.request({
+              method: 'wallet_addEthereumChain',
+              params: [{
+                chainId: '0xaa36a7',
+                chainName: 'Sepolia Test Network',
+                nativeCurrency: {
+                  name: 'Sepolia ETH',
+                  symbol: 'SepoliaETH',
+                  decimals: 18
+                },
+                rpcUrls: ['https://rpc.sepolia.org'],
+                blockExplorerUrls: ['https://sepolia.etherscan.io']
+              }]
+            });
+          } catch (error) {
+            alert('Please add Sepolia network to MetaMask manually');
+            return;
+          }
+        } else {
+          alert('Please switch to Sepolia network in MetaMask');
+          return;
+        }
+      }
+    }
 
     // 1️⃣ Upload file to IPFS
     const fileRes = await uploadFileToPinata(formData.file);
@@ -75,25 +117,55 @@ const Upload = () => {
     const metaRes = await uploadJSONToPinata(metadata);
     const metadataCID = metaRes.IpfsHash;
 
-    // 4️⃣ Call smart contract
+    // 4️⃣ Call smart contract with timeout
     const contract = await getContract();
+    
+    const itemType = formData.category === 'painting' ? 0 : 1;
+    const priceInWei = ethers.parseEther(formData.price);
 
-    const itemType =
-      formData.category === 'painting' ? 0 : 1; // enum mapping
-
-    const tx = await contract.registerArtwork(
+    console.log('Creating artwork with:', {
+      metadataCID,
       itemType,
-      metadataCID
-    );
+      price: priceInWei.toString()
+    });
 
-    await tx.wait();
+    // Add timeout to prevent hanging
+    const tx = await Promise.race([
+      contract.createArtwork(metadataCID, itemType, priceInWei),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Transaction creation timeout')), 30000)
+      )
+    ]);
+
+    console.log('Transaction sent:', tx.hash);
+    
+    // Wait for confirmation
+    const receipt = await tx.wait();
+    console.log('Transaction confirmed:', receipt);
 
     alert('Artwork successfully created 🎉');
     navigate('/marketplace');
 
   } catch (err) {
-    console.error(err);
-    alert('Upload failed. Check console.');
+    console.error('Upload failed:', err);
+    
+    // User-friendly error messages
+    if (err.message.includes('RPC endpoint')) {
+      alert('Network connection issue. Please try again in a few moments.');
+    } else if (err.message.includes('user rejected')) {
+      alert('Transaction was rejected in MetaMask');
+    } else if (err.message.includes('timeout')) {
+      alert('Transaction timed out. Please check if it completed on the blockchain.');
+    } else if (err.message.includes('network')) {
+      alert('Please make sure you are connected to Sepolia network in MetaMask.');
+    } else if (err.code === 4001) {
+      // User rejected request
+      alert('Transaction was rejected in MetaMask');
+    } else if (err.code === -32603) {
+      alert('Internal JSON-RPC error. Please check your contract and network.');
+    } else {
+      alert('Upload failed. Check console for details.');
+    }
   } finally {
     setLoading(false);
   }
@@ -120,10 +192,10 @@ const Upload = () => {
 
   //   try {
   //     setLoading(true);
-      
+
   //     // Simulate upload and minting process
   //     await new Promise((resolve) => setTimeout(resolve, 3000));
-      
+
   //     alert('NFT created successfully! Your asset has been minted and listed on the marketplace.');
   //     navigate('/marketplace');
   //   } catch (error) {
