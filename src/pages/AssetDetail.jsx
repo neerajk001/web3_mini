@@ -5,6 +5,9 @@ import { formatPrice, formatAddress, formatDate } from '../utils/helpers';
 import Button from '../components/Button';
 import Modal from '../components/Modal';
 import Loading from '../components/Loading';
+import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
+import { ethers } from 'ethers';
+import { getContractReadOnly } from '../utils/contract'; // ✅ Use read-only
 
 const AssetDetail = () => {
   const { id } = useParams();
@@ -15,51 +18,61 @@ const AssetDetail = () => {
   const [showBuyModal, setShowBuyModal] = useState(false);
   const [showRentModal, setShowRentModal] = useState(false);
   const [transactionLoading, setTransactionLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Mock asset data - replace with actual API call
-    setTimeout(() => {
-      setAsset({
-        id: id,
-        title: 'Abstract Dreams',
-        description:
-          'A vibrant digital painting exploring the boundaries of imagination and creativity. This piece represents the fusion of traditional art techniques with modern digital tools, creating a unique visual experience that transcends conventional artistic boundaries.',
-        type: 'painting',
-        price: '2.5',
-        rentPrice: '0.5',
-        image_url: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=800',
-        creator_name: 'Alice Creator',
-        creator_address: '0x1234567890abcdef1234567890abcdef12345678',
-        owner_name: 'Current Owner',
-        owner_address: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
-        verified: true,
-        created_at: '2024-01-15T10:30:00Z',
-        category: 'Digital Art',
-        dimensions: '4000x3000 px',
-        fileSize: '15.2 MB',
-        format: 'PNG',
-        royalty: '10%',
-        ownershipHistory: [
-          {
-            id: 1,
-            from: '0x0000000000000000000000000000000000000000',
-            to: '0x1234567890abcdef1234567890abcdef12345678',
-            price: '0',
-            date: '2024-01-15T10:30:00Z',
-            type: 'Minted',
-          },
-          {
-            id: 2,
-            from: '0x1234567890abcdef1234567890abcdef12345678',
-            to: '0xabcdefabcdefabcdefabcdefabcdefabcdefabcd',
-            price: '2.0',
-            date: '2024-02-20T14:15:00Z',
-            type: 'Sale',
-          },
-        ],
-      });
-      setLoading(false);
-    }, 800);
+    const fetchAsset = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const contract = getContractReadOnly();
+        const details = await contract.getArtworkDetails(id);
+
+        const metadataCID = details[0];
+        const itemType = details[1];
+        const owner = details[2];
+        const creator = details[3];
+        const createdAt = details[4];
+        const price = details[5];
+
+        let metadata = {};
+        try {
+          metadata = await fetchFromIPFS(metadataCID);
+        } catch (ipfsError) {
+          console.error('Failed to load metadata:', ipfsError);
+          setError('Could not load asset metadata. Please try again later.');
+          metadata = { title: 'Metadata Unavailable', description: '' };
+        }
+
+        setAsset({
+          id,
+          title: metadata.title || `Asset #${id}`,
+          description: metadata.description || 'No description',
+          type: itemType === 0 ? 'painting' : 'research-paper',
+          price: ethers.formatEther(price),
+          rentPrice: metadata.rentPrice || '0.1',
+          image_url: metadata.file ? getIPFSUrl(metadata.file) : '/placeholder.png',
+          creator_name: creator.substring(0, 6) + '...',
+          creator_address: creator,
+          owner_name: owner.substring(0, 6) + '...',
+          owner_address: owner,
+          verified: true,
+          created_at: new Date(Number(createdAt) * 1000).toISOString(),
+          category: metadata.category || 'Art',
+          royalty: '10%',
+          ownershipHistory: [],
+        });
+
+      } catch (error) {
+        console.error(error);
+        setError('Failed to load asset details');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchAsset();
   }, [id]);
 
   const handleBuy = async () => {

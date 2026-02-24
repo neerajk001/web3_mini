@@ -6,66 +6,125 @@ import AssetCard from '../components/AssetCard';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
 import { formatPrice, formatAddress, formatDate } from '../utils/helpers';
+import { getContractReadOnly } from '../utils/contract';
+import { getIPFSUrl, fetchFromIPFS } from '../utils/ipfs';
+import { ethers } from 'ethers';
 
 const Profile = () => {
   const navigate = useNavigate();
   const { connected, address, balance } = useWallet();
-  const { profile, transactions } = useUser();
+  const { profile } = useUser();
   const [activeTab, setActiveTab] = useState('owned');
   const [loading, setLoading] = useState(true);
   const [ownedAssets, setOwnedAssets] = useState([]);
   const [listedAssets, setListedAssets] = useState([]);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    if (!connected) {
-      navigate('/');
+    if (!connected || !address) {
+      setLoading(false);
       return;
     }
 
-    // Mock data - replace with actual API calls
-    setTimeout(() => {
-      setOwnedAssets([
-        {
-          id: '1',
-          title: 'Abstract Dreams',
-          description: 'A vibrant digital painting',
-          type: 'painting',
-          price: '2.5',
-          image_url: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=800',
-          creator_name: 'You',
-          verified: true,
-        },
-        {
-          id: '3',
-          title: 'Neon Cityscape',
-          description: 'Futuristic city illuminated',
-          type: 'painting',
-          price: '3.2',
-          image_url: 'https://images.unsplash.com/photo-1550684376-efcbd6e3f031?w=800',
-          creator_name: 'You',
-          verified: false,
-        },
-      ]);
+    const fetchOwnedNFTs = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      setListedAssets([
-        {
-          id: '5',
-          title: 'Cosmic Explosion',
-          description: 'Abstract representation',
-          type: 'painting',
-          price: '4.5',
-          image_url: 'https://images.unsplash.com/photo-1549887534-1541e9326642?w=800',
-          creator_name: 'You',
-          verified: true,
-        },
-      ]);
+        const contract = getContractReadOnly();
 
-      setLoading(false);
-    }, 800);
-  }, [connected, navigate]);
+        // 1️⃣ Get artwork IDs owned by this wallet
+        const artworkIds = await contract.getArtworksByOwner(address);
+        console.log('Artwork IDs:', artworkIds);
+
+        if (artworkIds.length === 0) {
+          setOwnedAssets([]);
+          setListedAssets([]);
+          return;
+        }
+
+        const assets = await Promise.all(
+          artworkIds.map(async (id) => {
+            try {
+              // 2️⃣ Get on-chain details
+              const details = await contract.getArtworkDetails(id);
+
+              const metadataCID = details[0];
+              const itemType = details[1];
+              const owner = details[2];
+              const creator = details[3];
+              const createdAt = details[4];
+              const price = details[5];
+
+              console.log(`Fetching metadata for artwork ${id.toString()}:`, metadataCID);
+
+              // 3️⃣ Fetch metadata from IPFS with fallback gateways
+              let metadata = {};
+              try {
+                metadata = await fetchFromIPFS(metadataCID);
+              } catch (ipfsError) {
+                console.error(`Failed to fetch metadata for artwork ${id}:`, ipfsError);
+                // Continue with default metadata if IPFS fetch fails
+                metadata = {
+                  title: `Artwork #${id.toString()}`,
+                  description: 'Metadata unavailable',
+                  file: '',
+                  category: 'Unknown',
+                };
+              }
+
+              return {
+                id: id.toString(),
+                title: metadata.title || `Artwork #${id.toString()}`,
+                description: metadata.description || 'No description',
+                type: itemType === 0 ? 'painting' : 'research-paper',
+                price: ethers.formatEther(price),
+                image_url: metadata.file ? getIPFSUrl(metadata.file) : '/placeholder.png',
+                creator_name: creator.substring(0, 6) + '...',
+                creator_address: creator,
+                owner_address: owner,
+                created_at: new Date(Number(createdAt) * 1000).toISOString(),
+                verified: true,
+                category: metadata.category || 'Art',
+              };
+            } catch (itemError) {
+              console.error(`Error fetching artwork ${id.toString()}:`, itemError);
+              return null;
+            }
+          })
+        );
+
+        // Filter out failed items
+        const validAssets = assets.filter((asset) => asset !== null);
+        setOwnedAssets(validAssets);
+
+        // Filter listed assets (creator matches connected wallet)
+        const listed = validAssets.filter(
+          (asset) =>
+            asset.creator_address.toLowerCase() === address.toLowerCase()
+        );
+        setListedAssets(listed);
+
+      } catch (error) {
+        console.error('Error fetching NFTs:', error);
+        setError(error.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchOwnedNFTs();
+  }, [connected, address]);
 
   if (!connected) {
-    return null;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4">Connect Your Wallet</h2>
+          <p className="text-gray-600 mb-6">Please connect your wallet to view your profile</p>
+        </div>
+      </div>
+    );
   }
 
   const mockTransactions = [
@@ -102,13 +161,11 @@ const Profile = () => {
   ];
 
   const stats = [
-{
-  label: 'Wallet Balance',
-  value: connected
-    ? `${Number(balance).toFixed(4)} ETH`
-    : 'Not connected',
-  icon: '💰',
-},
+    {
+      label: 'Wallet Balance',
+      value: connected ? `${Number(balance).toFixed(4)} ETH` : 'Not connected',
+      icon: '💰',
+    },
     { label: 'Owned NFTs', value: ownedAssets.length, icon: '🖼️' },
     { label: 'Listed Items', value: listedAssets.length, icon: '📋' },
     { label: 'Total Transactions', value: mockTransactions.length, icon: '📊' },
@@ -117,6 +174,14 @@ const Profile = () => {
   return (
     <div className="min-h-screen bg-gray-50 pt-24 pb-8">
       <div className="container mx-auto px-4">
+        {/* Error Alert */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-100 border border-red-400 text-red-700 rounded">
+            <p className="font-bold">Error loading assets:</p>
+            <p>{error}</p>
+          </div>
+        )}
+
         {/* Profile Header */}
         <div className="card p-8 mb-8">
           <div className="flex flex-col md:flex-row items-center md:items-start space-y-4 md:space-y-0 md:space-x-6">
@@ -135,7 +200,12 @@ const Profile = () => {
                   className="text-primary-600 hover:text-primary-700"
                   title="Copy address"
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg
+                    className="w-5 h-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
@@ -162,7 +232,9 @@ const Profile = () => {
             <div key={index} className="card p-6">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-3xl">{stat.icon}</span>
-                <span className="text-2xl font-bold text-primary-600">{stat.value}</span>
+                <span className="text-2xl font-bold text-primary-600">
+                  {stat.value}
+                </span>
               </div>
               <p className="text-gray-600 text-sm">{stat.label}</p>
             </div>
@@ -218,9 +290,15 @@ const Profile = () => {
                 {ownedAssets.length === 0 ? (
                   <div className="text-center py-16">
                     <div className="text-6xl mb-4">🖼️</div>
-                    <h3 className="text-2xl font-bold text-gray-700 mb-2">No owned NFTs yet</h3>
-                    <p className="text-gray-600 mb-6">Start collecting unique digital assets</p>
-                    <Button onClick={() => navigate('/marketplace')}>Browse Marketplace</Button>
+                    <h3 className="text-2xl font-bold text-gray-700 mb-2">
+                      No owned NFTs yet
+                    </h3>
+                    <p className="text-gray-600 mb-6">
+                      Start collecting unique digital assets
+                    </p>
+                    <Button onClick={() => navigate('/marketplace')}>
+                      Browse Marketplace
+                    </Button>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -238,8 +316,12 @@ const Profile = () => {
                 {listedAssets.length === 0 ? (
                   <div className="text-center py-16">
                     <div className="text-6xl mb-4">📋</div>
-                    <h3 className="text-2xl font-bold text-gray-700 mb-2">No listed items</h3>
-                    <p className="text-gray-600 mb-6">Create and list your first NFT</p>
+                    <h3 className="text-2xl font-bold text-gray-700 mb-2">
+                      No listed items
+                    </h3>
+                    <p className="text-gray-600 mb-6">
+                      Create and list your first NFT
+                    </p>
                     <Button onClick={() => navigate('/upload')}>Create NFT</Button>
                   </div>
                 ) : (
@@ -258,8 +340,12 @@ const Profile = () => {
                 {mockTransactions.length === 0 ? (
                   <div className="text-center py-16">
                     <div className="text-6xl mb-4">📊</div>
-                    <h3 className="text-2xl font-bold text-gray-700 mb-2">No transactions yet</h3>
-                    <p className="text-gray-600">Your transaction history will appear here</p>
+                    <h3 className="text-2xl font-bold text-gray-700 mb-2">
+                      No transactions yet
+                    </h3>
+                    <p className="text-gray-600">
+                      Your transaction history will appear here
+                    </p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -302,22 +388,30 @@ const Profile = () => {
                                 {tx.type}
                               </span>
                             </td>
-                            <td className="px-6 py-4 whitespace-nowrap font-medium">{tx.asset}</td>
+                            <td className="px-6 py-4 whitespace-nowrap font-medium">
+                              {tx.asset}
+                            </td>
                             <td className="px-6 py-4 whitespace-nowrap text-primary-600 font-semibold">
                               {tx.price === '0' ? 'N/A' : formatPrice(tx.price)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm">
                               {tx.type === 'Purchase' ? (
-                                <span className="text-gray-600">From: {formatAddress(tx.from)}</span>
+                                <span className="text-gray-600">
+                                  From: {formatAddress(tx.from)}
+                                </span>
                               ) : (
-                                <span className="text-gray-600">To: {formatAddress(tx.to)}</span>
+                                <span className="text-gray-600">
+                                  To: {formatAddress(tx.to)}
+                                </span>
                               )}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
                               {formatDate(tx.date)}
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
-                              <span className="text-green-600 font-semibold">✓ {tx.status}</span>
+                              <span className="text-green-600 font-semibold">
+                                ✓ {tx.status}
+                              </span>
                             </td>
                           </tr>
                         ))}

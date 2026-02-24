@@ -1,25 +1,38 @@
-import { BrowserProvider, Contract, FallbackProvider, JsonRpcProvider } from 'ethers';
-import ABI from '../abi/ArtworkRegistry.json';
 import { ethers } from 'ethers';
+import ArtworkRegistryJSON from '../abi/ArtworkRegistry.json';
 
-// Define multiple RPC endpoints
-const RPC_ENDPOINTS = [
-  'https://eth-sepolia.g.alchemy.com/v2/jJp3G0knsw5fJnFgFo-qr',
-  'https://rpc.sepolia.org',
-  'https://sepolia.gateway.tenderly.co',
-  'https://ethereum-sepolia.publicnode.com',
-].filter(url => url && !url.includes('undefined'));
+// Extract the ABI array from the JSON
+const ABI = ArtworkRegistryJSON.abi;
+const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x...';
 
-// OPTION 1: Use Alchemy provider directly (RECOMMENDED)
+// For READ-ONLY operations (no wallet needed)
+export const getContractReadOnly = () => {
+  try {
+    if (!window.ethereum) {
+      throw new Error('MetaMask not installed');
+    }
+
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
+    
+    return contract;
+  } catch (error) {
+    console.error('Error getting read-only contract:', error);
+    throw error;
+  }
+};
+
+// For WRITE operations (needs connected wallet)
 export const getContract = async () => {
   try {
+    if (!window.ethereum) {
+      throw new Error('MetaMask not installed');
+    }
+
     const provider = new ethers.BrowserProvider(window.ethereum);
-    const signer = await provider.getSigner(); // ✅ Already connected, no need to reconnect
+    const signer = await provider.getSigner(); // ✅ AWAIT THIS!
+    const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
     
-    const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS;
-    const contractABI = await import('../abi/ArtworkRegistry.json').then(m => m.default);
-    
-    const contract = new ethers.Contract(contractAddress, contractABI, signer);
     return contract;
   } catch (error) {
     console.error('Error getting contract:', error);
