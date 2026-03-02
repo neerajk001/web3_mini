@@ -4,52 +4,125 @@ import { useWallet } from '../context/WalletContext';
 import AssetCard from '../components/AssetCard';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
+import { fetchFromIPFS } from '../utils/ipfs';
+import { ethers } from 'ethers';
+import { getContractReadOnly } from '../utils/contract';
 
 const Landing = () => {
   const { connected } = useWallet();
   const [featuredAssets, setFeaturedAssets] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    // Mock featured assets - replace with actual API call
-    setTimeout(() => {
-      setFeaturedAssets([
-        {
-          id: '1',
-          title: 'Abstract Dreams',
-          description: 'A vibrant digital painting exploring the boundaries of imagination',
-          type: 'painting',
-          price: '2.5',
-          image_url: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=800',
-          creator_name: 'Alice Creator',
-          creator_address: '0x1234...5678',
-          verified: true,
-        },
-        {
-          id: '2',
-          title: 'Quantum Computing Research',
-          description: 'Groundbreaking research on quantum algorithms and their applications',
-          type: 'research-paper',
-          price: '1.8',
-          image_url: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800',
-          creator_name: 'Dr. Smith',
-          creator_address: '0xabcd...efgh',
-          verified: true,
-        },
-        {
-          id: '3',
-          title: 'Neon Cityscape',
-          description: 'Futuristic city illuminated by neon lights and digital art',
-          type: 'painting',
-          price: '3.2',
-          image_url: 'https://images.unsplash.com/photo-1550684376-efcbd6e3f031?w=800',
-          creator_name: 'Bob Artist',
-          creator_address: '0x9876...4321',
-          verified: false,
-        },
-      ]);
-      setLoading(false);
-    }, 1000);
+    const fetchFeaturedAssets = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        // ALWAYS use the robust RPC Provider for fetching landing items independent of the user's wallet
+        const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        
+        // Validate contract address is configured
+        const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
+        if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x...') {
+          console.warn('Contract address not configured');
+          setFeaturedAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Get ABI
+        const { abi: ABI } = await import('../abi/ArtworkRegistry.json');
+        
+        // Create contract instance with fresh provider
+        // Re-use our centralized read-only method, or just use the localized provider
+        const contract = getContractReadOnly();
+
+        // Verify contract exists by checking code at address
+        const code = await provider.getCode(CONTRACT_ADDRESS);
+        if (code === '0x') {
+          console.error(`No contract found at address ${CONTRACT_ADDRESS}. Check your network and contract address.`);
+          setError("Contract not found on this network. Please check your network.");
+          setFeaturedAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Fetch nextArtworkId
+        let nextId;
+        try {
+          nextId = await contract.nextArtworkId();
+        } catch (err) {
+          console.error("Contract call failed. Verify contract address and network:", err);
+          setError("Contract is not responding. Check your network connection.");
+          setFeaturedAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        const totalArtworks = Number(nextId);
+
+        if (totalArtworks === 0) {
+          setFeaturedAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        const assets = [];
+        // Fetch last 3 created artworks for the landing page
+        const limit = Math.min(totalArtworks, 3);
+        let failedCount = 0;
+
+        for (let i = 0; i < limit; i++) {
+          const artworkId = totalArtworks - 1 - i;
+          if (artworkId < 0) continue;
+
+          try {
+            const artwork = await contract.artworks(artworkId);
+            
+            // Check if metadataCID exists
+            if (!artwork.metadataCID) {
+              console.warn(`Artwork ${artworkId} has no metadata CID`);
+              continue;
+            }
+
+            // Fetch metadata with retries
+            const metadata = await fetchFromIPFS(artwork.metadataCID);
+
+            assets.push({
+              id: artworkId.toString(),
+              title: metadata.title || 'Untitled',
+              description: metadata.description || 'No description',
+              image_url: metadata.image || metadata.image_url || '',
+              price: ethers.formatEther(artwork.price),
+              creator_address: artwork.creator,
+              owner_address: artwork.owner,
+              type: artwork.itemType === 0 ? 'painting' : 'research-paper',
+            });
+          } catch (err) {
+            console.error(`Failed to fetch artwork ${artworkId}:`, err);
+            failedCount++;
+            // Continue to next artwork instead of breaking
+            continue;
+          }
+        }
+
+        if (assets.length === 0 && failedCount > 0) {
+          setError("Unable to load artwork metadata. Please try refreshing the page.");
+        }
+
+        setFeaturedAssets(assets);
+      } catch (err) {
+        console.error("Error fetching featured assets:", err);
+        setError("Failed to load featured assets. Please try again later.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFeaturedAssets();
   }, []);
 
   return (
@@ -118,6 +191,8 @@ const Landing = () => {
 
           {loading ? (
             <Loading message="Loading featured NFTs..." />
+          ) : error ? (
+            <div className="text-center text-red-500">{error}</div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
               {featuredAssets.map((asset) => (

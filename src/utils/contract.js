@@ -5,14 +5,11 @@ import ArtworkRegistryJSON from '../abi/ArtworkRegistry.json';
 const ABI = ArtworkRegistryJSON.abi;
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x...';
 
-// For READ-ONLY operations (no wallet needed)
+// For READ-ONLY operations (no wallet needed, forces correct network)
 export const getContractReadOnly = () => {
   try {
-    if (!window.ethereum) {
-      throw new Error('MetaMask not installed');
-    }
-
-    const provider = new ethers.BrowserProvider(window.ethereum);
+    const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
     const contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
     
     return contract;

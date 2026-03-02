@@ -6,45 +6,39 @@ export const getIPFSUrl = (cid) => {
   // If it's already a full URL, return it
   if (cid.startsWith('http')) return cid;
   
-  // Use multiple IPFS gateways for reliability
-  // Try Cloudflare first, then fallback to Pinata
-  return `https://cloudflare-ipfs.com/ipfs/${cid}`;
+  // Use a reliable public gateway
+  return `https://cloudflare-ipfs.com/ipfs/${cid.replace('ipfs://', '')}`;
 };
 
-// Alternative gateways to try if one fails
+// A list of public IPFS gateways to try in order
 export const IPFS_GATEWAYS = [
-  'https://cloudflare-ipfs.com/ipfs/',
-  'https://gateway.pinata.cloud/ipfs/',
   'https://ipfs.io/ipfs/',
   'https://dweb.link/ipfs/',
+  'https://gateway.pinata.cloud/ipfs/',
+  'https://cloudflare-ipfs.com/ipfs/'
 ];
 
-// Fetch with fallback gateways
+// Fetch JSON from IPFS with fallback to multiple gateways
 export const fetchFromIPFS = async (cid) => {
   if (!cid) throw new Error('CID is required');
+  const normalizedCID = cid.replace('ipfs://', '');
 
   for (const gateway of IPFS_GATEWAYS) {
     try {
-      const url = `${gateway}${cid}`;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        },
-      });
+      const url = `${gateway}${normalizedCID}`;
+      // Do not pass Accept headers - it forces a CORS preflight OPTIONS request
+      // which fails heavily on rate-limited public gateways.
+      const response = await fetch(url);
 
-      if (!response.ok) {
-        console.warn(`Gateway ${gateway} failed with status ${response.status}`);
-        continue;
+      if (response.ok) {
+        return await response.json();
       }
-
-      const data = await response.json();
-      return data;
+      console.warn(`Gateway ${gateway} failed with status ${response.status}`);
     } catch (error) {
-      console.warn(`Gateway ${gateway} failed:`, error);
-      continue;
+      console.warn(`Gateway ${gateway} failed with error:`, error.message);
     }
   }
 
-  throw new Error(`Failed to fetch from IPFS with CID: ${cid}`);
+  throw new Error(`Failed to fetch from IPFS for CID: ${normalizedCID}`);
 };
+
