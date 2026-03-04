@@ -1,260 +1,203 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AssetCard from '../components/AssetCard';
+import Button from '../components/Button';
 import Loading from '../components/Loading';
+import { fetchFromIPFS } from '../utils/ipfs';
+import { ethers } from 'ethers';
+import { getContractReadOnly } from '../utils/contract';
 
 const Marketplace = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    type: searchParams.get('type') || '',
-    search: '',
-    minPrice: '',
-    maxPrice: '',
-    sortBy: 'newest',
-  });
+  const [error, setError] = useState(null);
 
-  // Mock data - replace with actual API call
-  const mockAssets = [
-    {
-      id: '1',
-      title: 'Abstract Dreams',
-      description: 'A vibrant digital painting exploring the boundaries of imagination',
-      type: 'painting',
-      price: '2.5',
-      image_url: 'https://images.unsplash.com/photo-1541961017774-22349e4a1262?w=800',
-      creator_name: 'Alice Creator',
-      verified: true,
-    },
-    {
-      id: '2',
-      title: 'Quantum Computing Research',
-      description: 'Groundbreaking research on quantum algorithms and their applications',
-      type: 'research-paper',
-      price: '1.8',
-      image_url: 'https://images.unsplash.com/photo-1635070041078-e363dbe005cb?w=800',
-      creator_name: 'Dr. Smith',
-      verified: true,
-    },
-    {
-      id: '3',
-      title: 'Neon Cityscape',
-      description: 'Futuristic city illuminated by neon lights',
-      type: 'painting',
-      price: '3.2',
-      image_url: 'https://images.unsplash.com/photo-1550684376-efcbd6e3f031?w=800',
-      creator_name: 'Bob Artist',
-      verified: false,
-    },
-    {
-      id: '4',
-      title: 'Machine Learning Study',
-      description: 'Advanced research on neural networks and deep learning',
-      type: 'research-paper',
-      price: '2.1',
-      image_url: 'https://images.unsplash.com/photo-1515879218367-8466d910aaa4?w=800',
-      creator_name: 'Dr. Johnson',
-      verified: true,
-    },
-    {
-      id: '5',
-      title: 'Cosmic Explosion',
-      description: 'Abstract representation of the universe',
-      type: 'painting',
-      price: '4.5',
-      image_url: 'https://images.unsplash.com/photo-1549887534-1541e9326642?w=800',
-      creator_name: 'Cosmic Artist',
-      verified: true,
-    },
-    {
-      id: '6',
-      title: 'Climate Change Analysis',
-      description: 'Comprehensive study on global warming impacts',
-      type: 'research-paper',
-      price: '1.5',
-      image_url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=800',
-      creator_name: 'Dr. Green',
-      verified: false,
-    },
-  ];
+  // Filter states
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState(searchParams.get('type') || 'all');
+
+  // Update filter type when URL param changes
+  useEffect(() => {
+    const type = searchParams.get('type');
+    if (type) {
+      setFilterType(type);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
-    // Simulate API call
-    setLoading(true);
-    setTimeout(() => {
-      let filtered = [...mockAssets];
+    const fetchAssets = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      // Filter by type
-      if (filters.type) {
-        filtered = filtered.filter((asset) => asset.type === filters.type);
+        // ALWAYS use the robust RPC Provider for fetching items independent of the user's wallet
+        const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
+        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        
+        // Validate contract address is configured
+        const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
+        if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x...') {
+          console.warn('Contract address not configured');
+          setAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Create contract instance
+        const contract = getContractReadOnly();
+
+        // Verify contract exists
+        const code = await provider.getCode(CONTRACT_ADDRESS);
+        if (code === '0x') {
+          setError("Contract not found on this network. Please check your network.");
+          setAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        // Fetch nextArtworkId
+        let nextId;
+        try {
+          nextId = await contract.nextArtworkId();
+        } catch (err) {
+          console.error("Contract call failed:", err);
+          setError("Contract is not responding. Check your network connection.");
+          setAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        const totalArtworks = Number(nextId);
+
+        if (totalArtworks === 0) {
+          setAssets([]);
+          setLoading(false);
+          return;
+        }
+
+        const loadedAssets = [];
+        // Fetch ALL artworks (iterate backwards to show newest first)
+        for (let i = totalArtworks - 1; i >= 0; i--) {
+          try {
+            const artwork = await contract.artworks(i);
+            
+            // Check if metadataCID exists
+            if (!artwork.metadataCID) continue;
+
+            // Fetch metadata with retries
+            const metadata = await fetchFromIPFS(artwork.metadataCID);
+
+            loadedAssets.push({
+              id: i.toString(),
+              title: metadata.title || 'Untitled',
+              description: metadata.description || 'No description',
+              image_url: metadata.image || metadata.image_url || '',
+              price: ethers.formatEther(artwork.price),
+              creator_address: artwork.creator,
+              owner_address: artwork.owner,
+              isListed: artwork.isListed, // Useful for marketplace logic
+              type: artwork.itemType === 0 ? 'painting' : 'research-paper',
+            });
+          } catch (err) {
+            console.error(`Failed to fetch artwork ${i}:`, err);
+            // Continue to next artwork
+            continue;
+          }
+        }
+
+        setAssets(loadedAssets);
+      } catch (err) {
+        console.error("Error fetching marketplace assets:", err);
+        setError("Failed to load marketplace assets. Please try again later.");
+      } finally {
+        setLoading(false);
       }
+    };
 
-      // Filter by search
-      if (filters.search) {
-        filtered = filtered.filter(
-          (asset) =>
-            asset.title.toLowerCase().includes(filters.search.toLowerCase()) ||
-            asset.description.toLowerCase().includes(filters.search.toLowerCase())
-        );
-      }
+    fetchAssets();
+  }, []);
 
-      // Filter by price
-      if (filters.minPrice) {
-        filtered = filtered.filter((asset) => parseFloat(asset.price) >= parseFloat(filters.minPrice));
-      }
-      if (filters.maxPrice) {
-        filtered = filtered.filter((asset) => parseFloat(asset.price) <= parseFloat(filters.maxPrice));
-      }
+  // Filter logic based on fetched assets
+  const filteredAssets = assets.filter(asset => {
+    const matchesSearch = asset.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                          asset.description.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = filterType === 'all' || asset.type === filterType;
+    
+    return matchesSearch && matchesType;
+  });
 
-      // Sort
-      if (filters.sortBy === 'price-low') {
-        filtered.sort((a, b) => parseFloat(a.price) - parseFloat(b.price));
-      } else if (filters.sortBy === 'price-high') {
-        filtered.sort((a, b) => parseFloat(b.price) - parseFloat(a.price));
-      }
-
-      setAssets(filtered);
-      setLoading(false);
-    }, 500);
-  }, [filters]);
-
-  const handleFilterChange = (key, value) => {
-    setFilters((prev) => ({ ...prev, [key]: value }));
-    if (key === 'type') {
-      if (value) {
-        setSearchParams({ type: value });
-      } else {
-        setSearchParams({});
-      }
-    }
-  };
-
-  const clearFilters = () => {
-    setFilters({
-      type: '',
-      search: '',
-      minPrice: '',
-      maxPrice: '',
-      sortBy: 'newest',
-    });
-    setSearchParams({});
+  const handleFilterChange = (type) => {
+    setFilterType(type);
+    setSearchParams({ type: type === 'all' ? '' : type });
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 py-8">
-      <div className="container mx-auto px-4">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-bold mb-2">Explore NFT Marketplace</h1>
-          <p className="text-gray-600">Discover unique digital assets from creators around the world</p>
-        </div>
-
-        {/* Filters */}
-        <div className="bg-white rounded-xl shadow-md p-6 mb-8">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Search */}
-            <div className="lg:col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
-              <input
-                type="text"
-                placeholder="Search by title or description..."
-                value={filters.search}
-                onChange={(e) => handleFilterChange('search', e.target.value)}
-                className="input-field"
-              />
-            </div>
-
-            {/* Type Filter */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Category</label>
-              <select
-                value={filters.type}
-                onChange={(e) => handleFilterChange('type', e.target.value)}
-                className="input-field"
-              >
-                <option value="">All Types</option>
-                <option value="painting">Paintings</option>
-                <option value="research-paper">Research Papers</option>
-              </select>
-            </div>
-
-            {/* Price Range */}
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Min Price (ETH)</label>
-              <input
-                type="number"
-                placeholder="0.0"
-                step="0.1"
-                value={filters.minPrice}
-                onChange={(e) => handleFilterChange('minPrice', e.target.value)}
-                className="input-field"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Max Price (ETH)</label>
-              <input
-                type="number"
-                placeholder="10.0"
-                step="0.1"
-                value={filters.maxPrice}
-                onChange={(e) => handleFilterChange('maxPrice', e.target.value)}
-                className="input-field"
-              />
-            </div>
+    <div className="min-h-screen bg-black pt-32 pb-12 px-4">
+      <div className="container mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-center mb-12 gap-6">
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">Marketplace</h1>
+            <p className="text-gray-400">Explore, collect, and trade unique digital assets</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between mt-4 gap-4">
-            {/* Sort */}
-            <div className="flex items-center space-x-3">
-              <label className="text-sm font-medium text-gray-700">Sort by:</label>
-              <select
-                value={filters.sortBy}
-                onChange={(e) => handleFilterChange('sortBy', e.target.value)}
-                className="input-field w-auto"
-              >
-                <option value="newest">Newest</option>
-                <option value="price-low">Price: Low to High</option>
-                <option value="price-high">Price: High to Low</option>
-              </select>
-            </div>
-
-            {/* Clear Filters */}
-            <button
-              onClick={clearFilters}
-              className="text-primary-600 hover:text-primary-700 font-medium text-sm"
-            >
-              Clear All Filters
-            </button>
+          <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
+            {/* Search Bar */}
+            <input
+              type="text"
+              placeholder="Search assets..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="px-4 py-2 bg-gray-900 border border-gray-700 rounded-lg text-white focus:outline-hidden focus:border-cyan-500 w-full sm:w-64"
+            />
           </div>
         </div>
 
-        {/* Results Count */}
-        <div className="mb-6">
-          <p className="text-gray-600">
-            {loading ? 'Loading...' : `${assets.length} asset${assets.length !== 1 ? 's' : ''} found`}
-          </p>
+        {/* Filter Tabs */}
+        <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
+          <Button 
+            variant={filterType === 'all' ? 'primary' : 'outline'}
+            onClick={() => handleFilterChange('all')}
+            className={filterType === 'all' ? 'bg-cyan-600' : 'border-gray-600'}
+          >
+            All Items
+          </Button>
+          <Button 
+            variant={filterType === 'painting' ? 'primary' : 'outline'}
+            onClick={() => handleFilterChange('painting')}
+            className={filterType === 'painting' ? 'bg-cyan-600' : 'border-gray-600'}
+          >
+            Paintings
+          </Button>
+          <Button 
+            variant={filterType === 'research-paper' ? 'primary' : 'outline'}
+            onClick={() => handleFilterChange('research-paper')}
+            className={filterType === 'research-paper' ? 'bg-cyan-600' : 'border-gray-600'}
+          >
+            Research Papers
+          </Button>
         </div>
 
-        {/* Assets Grid */}
+        {/* Content */}
         {loading ? (
-          <Loading message="Loading assets..." />
-        ) : assets.length === 0 ? (
-          <div className="text-center py-16">
-            <div className="text-6xl mb-4">🔍</div>
-            <h3 className="text-2xl font-bold text-gray-700 mb-2">No assets found</h3>
-            <p className="text-gray-600 mb-6">Try adjusting your filters or search terms</p>
-            <button
-              onClick={clearFilters}
-              className="btn-primary"
-            >
-              Clear Filters
-            </button>
+          <Loading message="Loading marketplace..." />
+        ) : error ? (
+          <div className="text-center py-20">
+            <p className="text-red-500 text-xl mb-4">{error}</p>
+            <Button onClick={() => window.location.reload()}>Try Again</Button>
+          </div>
+        ) : filteredAssets.length === 0 ? (
+          <div className="text-center py-20 bg-gray-900/50 rounded-2xl border border-gray-800">
+            <h3 className="text-2xl font-bold text-gray-300 mb-2">No items found</h3>
+            <p className="text-gray-500">
+              {searchTerm || filterType !== 'all' 
+                ? 'Try adjusting your filters' 
+                : 'Be the first to create an NFT on this platform!'}
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-            {assets.map((asset) => (
+            {filteredAssets.map((asset) => (
               <AssetCard key={asset.id} asset={asset} showOwner={true} />
             ))}
           </div>
