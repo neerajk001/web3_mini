@@ -13,11 +13,9 @@ const Marketplace = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Filter states
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState(searchParams.get('type') || 'all');
 
-  // Update filter type when URL param changes
   useEffect(() => {
     const type = searchParams.get('type');
     if (type) {
@@ -31,11 +29,9 @@ const Marketplace = () => {
         setLoading(true);
         setError(null);
 
-        // ALWAYS use the robust RPC Provider for fetching items independent of the user's wallet
         const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
         const provider = new ethers.JsonRpcProvider(rpcUrl);
-        
-        // Validate contract address is configured
+
         const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
         if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x...') {
           console.warn('Contract address not configured');
@@ -44,10 +40,8 @@ const Marketplace = () => {
           return;
         }
 
-        // Create contract instance
         const contract = getContractReadOnly();
 
-        // Verify contract exists
         const code = await provider.getCode(CONTRACT_ADDRESS);
         if (code === '0x') {
           setError("Contract not found on this network. Please check your network.");
@@ -56,7 +50,6 @@ const Marketplace = () => {
           return;
         }
 
-        // Fetch nextArtworkId
         let nextId;
         try {
           nextId = await contract.nextArtworkId();
@@ -77,15 +70,12 @@ const Marketplace = () => {
         }
 
         const loadedAssets = [];
-        // Fetch ALL artworks (iterate backwards to show newest first)
         for (let i = totalArtworks - 1; i >= 0; i--) {
           try {
             const artwork = await contract.artworks(i);
-            
-            // Check if metadataCID exists
+
             if (!artwork.metadataCID) continue;
 
-            // Fetch metadata with retries
             const metadata = await fetchFromIPFS(artwork.metadataCID);
 
             loadedAssets.push({
@@ -96,12 +86,11 @@ const Marketplace = () => {
               price: ethers.formatEther(artwork.price),
               creator_address: artwork.creator,
               owner_address: artwork.owner,
-              isListed: artwork.isListed, // Useful for marketplace logic
-              type: artwork.itemType === 0 ? 'painting' : 'research-paper',
+              isListed: artwork.isListed,
+              type: Number(artwork.itemType) === 0 ? 'painting' : 'research-paper',
             });
           } catch (err) {
             console.error(`Failed to fetch artwork ${i}:`, err);
-            // Continue to next artwork
             continue;
           }
         }
@@ -118,12 +107,10 @@ const Marketplace = () => {
     fetchAssets();
   }, []);
 
-  // Filter logic based on fetched assets
   const filteredAssets = assets.filter(asset => {
-    const matchesSearch = asset.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
+    const matchesSearch = asset.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                           asset.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = filterType === 'all' || asset.type === filterType;
-    
     return matchesSearch && matchesType;
   });
 
@@ -142,7 +129,6 @@ const Marketplace = () => {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto">
-            {/* Search Bar */}
             <input
               type="text"
               placeholder="Search assets..."
@@ -155,21 +141,21 @@ const Marketplace = () => {
 
         {/* Filter Tabs */}
         <div className="flex gap-4 mb-8 overflow-x-auto pb-2">
-          <Button 
+          <Button
             variant={filterType === 'all' ? 'primary' : 'outline'}
             onClick={() => handleFilterChange('all')}
             className={filterType === 'all' ? 'bg-cyan-600' : 'border-gray-600'}
           >
             All Items
           </Button>
-          <Button 
+          <Button
             variant={filterType === 'painting' ? 'primary' : 'outline'}
             onClick={() => handleFilterChange('painting')}
             className={filterType === 'painting' ? 'bg-cyan-600' : 'border-gray-600'}
           >
             Paintings
           </Button>
-          <Button 
+          <Button
             variant={filterType === 'research-paper' ? 'primary' : 'outline'}
             onClick={() => handleFilterChange('research-paper')}
             className={filterType === 'research-paper' ? 'bg-cyan-600' : 'border-gray-600'}
@@ -190,8 +176,8 @@ const Marketplace = () => {
           <div className="text-center py-20 bg-gray-900/50 rounded-2xl border border-gray-800">
             <h3 className="text-2xl font-bold text-gray-300 mb-2">No items found</h3>
             <p className="text-gray-500">
-              {searchTerm || filterType !== 'all' 
-                ? 'Try adjusting your filters' 
+              {searchTerm || filterType !== 'all'
+                ? 'Try adjusting your filters'
                 : 'Be the first to create an NFT on this platform!'}
             </p>
           </div>

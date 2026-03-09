@@ -16,7 +16,6 @@ const Upload = () => {
     category: 'painting',
     price: '',
     rentPrice: '',
-    royalty: '10',
     file: null,
   });
   const [preview, setPreview] = useState(null);
@@ -31,7 +30,6 @@ const Upload = () => {
     if (file) {
       setFormData((prev) => ({ ...prev, file }));
 
-      // Create preview
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreview(reader.result);
@@ -40,171 +38,119 @@ const Upload = () => {
     }
   };
 
-const handleSubmit = async (e) => {
-  e.preventDefault();
+  const handleSubmit = async (e) => {
+    e.preventDefault();
 
-  if (!connected) {
-    alert('Please connect your wallet');
-    return;
-  }
+    if (!connected) {
+      alert('Please connect your wallet');
+      return;
+    }
 
-  if (!formData.file || !formData.title || !formData.description) {
-    alert('Missing required fields');
-    return;
-  }
+    if (!formData.file || !formData.title || !formData.description) {
+      alert('Missing required fields');
+      return;
+    }
 
-  try {
-    setLoading(true);
+    try {
+      setLoading(true);
 
-    // Check if MetaMask is on correct network
-    const chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    
-    // If not on Sepolia, try to switch networks
-    if (chainId !== '0xaa36a7') { // Sepolia chainId in hex
-      try {
-        // Try to switch to Sepolia
-        await window.ethereum.request({
-          method: 'wallet_switchEthereumChain',
-          params: [{ chainId: '0xaa36a7' }], // Sepolia
-        });
-      } catch (switchError) {
-        // This error code indicates that the chain has not been added to MetaMask
-        if (switchError.code === 4902) {
-          try {
-            // Add Sepolia network to MetaMask
-            await window.ethereum.request({
-              method: 'wallet_addEthereumChain',
-              params: [{
-                chainId: '0xaa36a7',
-                chainName: 'Sepolia Test Network',
-                nativeCurrency: {
-                  name: 'Sepolia ETH',
-                  symbol: 'SepoliaETH',
-                  decimals: 18
-                },
-                rpcUrls: ['https://rpc.sepolia.org'],
-                blockExplorerUrls: ['https://sepolia.etherscan.io']
-              }]
-            });
-          } catch (error) {
-            alert('Please add Sepolia network to MetaMask manually');
+      const chainId = await window.ethereum.request({ method: 'eth_chainId' });
+
+      if (chainId !== '0xaa36a7') {
+        try {
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0xaa36a7' }],
+          });
+        } catch (switchError) {
+          if (switchError.code === 4902) {
+            try {
+              await window.ethereum.request({
+                method: 'wallet_addEthereumChain',
+                params: [{
+                  chainId: '0xaa36a7',
+                  chainName: 'Sepolia Test Network',
+                  nativeCurrency: { name: 'Sepolia ETH', symbol: 'SepoliaETH', decimals: 18 },
+                  rpcUrls: ['https://rpc.sepolia.org'],
+                  blockExplorerUrls: ['https://sepolia.etherscan.io'],
+                }],
+              });
+            } catch {
+              alert('Please add Sepolia network to MetaMask manually');
+              return;
+            }
+          } else {
+            alert('Please switch to Sepolia network in MetaMask');
             return;
           }
-        } else {
-          alert('Please switch to Sepolia network in MetaMask');
-          return;
         }
       }
+
+      // 1. Upload file to IPFS
+      const fileRes = await uploadFileToPinata(formData.file);
+      const fileCID = fileRes.IpfsHash;
+
+      // 2. Create metadata
+      const metadata = {
+        title: formData.title,
+        description: formData.description,
+        category: formData.category,
+        creator: address,
+        createdAt: new Date().toISOString(),
+        file: `ipfs://${fileCID}`,
+        price: formData.price,
+        rentPrice: formData.rentPrice || null,
+      };
+
+      // 3. Upload metadata to IPFS
+      const metaRes = await uploadJSONToPinata(metadata);
+      const metadataCID = metaRes.IpfsHash;
+
+      // 4. Call smart contract
+      const contract = await getContract();
+
+      // 0 = PAINTING, 1 = RESEARCH_PAPER  (matches contract enum)
+      const itemType = formData.category === 'painting' ? 0 : 1;
+      const priceInWei = ethers.parseEther(formData.price);
+
+      console.log('Creating artwork with:', { metadataCID, itemType, price: priceInWei.toString() });
+
+      const tx = await Promise.race([
+        contract.createArtwork(metadataCID, itemType, priceInWei),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Transaction creation timeout')), 30000)
+        ),
+      ]);
+
+      console.log('Transaction sent:', tx.hash);
+      const receipt = await tx.wait();
+      console.log('Transaction confirmed:', receipt);
+
+      alert('Artwork successfully created 🎉');
+      navigate('/marketplace');
+
+    } catch (err) {
+      console.error('Upload failed:', err);
+
+      if (err.message.includes('RPC endpoint')) {
+        alert('Network connection issue. Please try again in a few moments.');
+      } else if (err.message.includes('user rejected')) {
+        alert('Transaction was rejected in MetaMask');
+      } else if (err.message.includes('timeout')) {
+        alert('Transaction timed out. Please check if it completed on the blockchain.');
+      } else if (err.message.includes('network')) {
+        alert('Please make sure you are connected to Sepolia network in MetaMask.');
+      } else if (err.code === 4001) {
+        alert('Transaction was rejected in MetaMask');
+      } else if (err.code === -32603) {
+        alert('Internal JSON-RPC error. Please check your contract and network.');
+      } else {
+        alert('Upload failed. Check console for details.');
+      }
+    } finally {
+      setLoading(false);
     }
-
-    // 1️⃣ Upload file to IPFS
-    const fileRes = await uploadFileToPinata(formData.file);
-    const fileCID = fileRes.IpfsHash;
-
-    // 2️⃣ Create metadata
-    const metadata = {
-      title: formData.title,
-      description: formData.description,
-      category: formData.category,
-      creator: address,
-      createdAt: new Date().toISOString(),
-      file: `ipfs://${fileCID}`,
-      price: formData.price,
-      rentPrice: formData.rentPrice || null,
-    };
-
-    // 3️⃣ Upload metadata to IPFS
-    const metaRes = await uploadJSONToPinata(metadata);
-    const metadataCID = metaRes.IpfsHash;
-
-    // 4️⃣ Call smart contract with timeout
-    const contract = await getContract();
-    
-    const itemType = formData.category === 'painting' ? 0 : 1;
-    const priceInWei = ethers.parseEther(formData.price);
-
-    console.log('Creating artwork with:', {
-      metadataCID,
-      itemType,
-      price: priceInWei.toString()
-    });
-
-    // Add timeout to prevent hanging
-    const tx = await Promise.race([
-      contract.createArtwork(metadataCID, itemType, priceInWei),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Transaction creation timeout')), 30000)
-      )
-    ]);
-
-    console.log('Transaction sent:', tx.hash);
-    
-    // Wait for confirmation
-    const receipt = await tx.wait();
-    console.log('Transaction confirmed:', receipt);
-
-    alert('Artwork successfully created 🎉');
-    navigate('/marketplace');
-
-  } catch (err) {
-    console.error('Upload failed:', err);
-    
-    // User-friendly error messages
-    if (err.message.includes('RPC endpoint')) {
-      alert('Network connection issue. Please try again in a few moments.');
-    } else if (err.message.includes('user rejected')) {
-      alert('Transaction was rejected in MetaMask');
-    } else if (err.message.includes('timeout')) {
-      alert('Transaction timed out. Please check if it completed on the blockchain.');
-    } else if (err.message.includes('network')) {
-      alert('Please make sure you are connected to Sepolia network in MetaMask.');
-    } else if (err.code === 4001) {
-      // User rejected request
-      alert('Transaction was rejected in MetaMask');
-    } else if (err.code === -32603) {
-      alert('Internal JSON-RPC error. Please check your contract and network.');
-    } else {
-      alert('Upload failed. Check console for details.');
-    }
-  } finally {
-    setLoading(false);
-  }
-};
-
-  // const handleSubmit = async (e) => {
-  //   e.preventDefault();
-
-  //   if (!connected) {
-  //     alert('Please connect your wallet first');
-  //     return;
-  //   }
-
-  //   // Validation
-  //   if (!formData.file) {
-  //     alert('Please select a file to upload');
-  //     return;
-  //   }
-
-  //   if (!formData.title || !formData.description || !formData.price) {
-  //     alert('Please fill in all required fields');
-  //     return;
-  //   }
-
-  //   try {
-  //     setLoading(true);
-
-  //     // Simulate upload and minting process
-  //     await new Promise((resolve) => setTimeout(resolve, 3000));
-
-  //     alert('NFT created successfully! Your asset has been minted and listed on the marketplace.');
-  //     navigate('/marketplace');
-  //   } catch (error) {
-  //     console.error('Upload failed:', error);
-  //     alert('Failed to create NFT. Please try again.');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
+  };
 
   if (!connected) {
     return (
@@ -361,12 +307,16 @@ const handleSubmit = async (e) => {
           </div>
 
           {/* Summary */}
-          <div className="card p-6 bg-gradient-to-br from-primary-50 to-secondary-50">
+          <div className="card p-6 bg-linear-to-br from-primary-50 to-secondary-50">
             <h3 className="text-xl font-bold mb-4">Summary</h3>
             <div className="space-y-3">
               <div className="flex justify-between">
                 <span className="text-gray-600">Creator</span>
                 <span className="font-semibold">{address?.substring(0, 10)}...</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-gray-600">Category</span>
+                <span className="font-semibold capitalize">{formData.category === 'painting' ? 'Digital Painting' : 'Research Paper'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Sale Price</span>
@@ -378,10 +328,6 @@ const handleSubmit = async (e) => {
                   <span className="font-semibold">{formData.rentPrice} ETH/month</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-gray-600">Creator Royalty</span>
-                <span className="font-semibold">{formData.royalty}%</span>
-              </div>
               <div className="flex justify-between pt-3 border-t border-primary-200">
                 <span className="text-gray-600">Estimated Gas Fee</span>
                 <span className="font-semibold">~0.005 ETH</span>

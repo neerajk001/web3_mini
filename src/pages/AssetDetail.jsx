@@ -7,7 +7,7 @@ import Modal from '../components/Modal';
 import Loading from '../components/Loading';
 import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
 import { ethers } from 'ethers';
-import { getContractReadOnly } from '../utils/contract'; // ✅ Use read-only
+import { getContractReadOnly } from '../utils/contract';
 
 const AssetDetail = () => {
   const { id } = useParams();
@@ -49,7 +49,8 @@ const AssetDetail = () => {
           id,
           title: metadata.title || `Asset #${id}`,
           description: metadata.description || 'No description',
-          type: itemType === 0 ? 'painting' : 'research-paper',
+          // Use Number() to safely compare — ethers v6 returns BigInt for enum values
+          type: Number(itemType) === 0 ? 'painting' : 'research-paper',
           price: ethers.formatEther(price),
           rentPrice: metadata.rentPrice || '0.1',
           image_url: metadata.file ? getIPFSUrl(metadata.file) : '/placeholder.png',
@@ -60,7 +61,6 @@ const AssetDetail = () => {
           verified: true,
           created_at: new Date(Number(createdAt) * 1000).toISOString(),
           category: metadata.category || 'Art',
-          royalty: '10%',
           ownershipHistory: [],
         });
 
@@ -83,7 +83,6 @@ const AssetDetail = () => {
 
     try {
       setTransactionLoading(true);
-      // Simulate transaction
       await new Promise((resolve) => setTimeout(resolve, 2000));
       alert('Purchase successful! NFT has been transferred to your wallet.');
       setShowBuyModal(false);
@@ -104,7 +103,6 @@ const AssetDetail = () => {
 
     try {
       setTransactionLoading(true);
-      // Simulate transaction
       await new Promise((resolve) => setTimeout(resolve, 2000));
       alert('Rental successful! You can now access this asset.');
       setShowRentModal(false);
@@ -156,7 +154,7 @@ const AssetDetail = () => {
                 alt={asset.title}
                 className="w-full h-auto rounded-xl"
               />
-              
+
               {/* Asset Badges */}
               <div className="flex items-center gap-2 mt-4">
                 {asset.verified && (
@@ -188,7 +186,7 @@ const AssetDetail = () => {
                 <div className="card p-4">
                   <p className="text-sm text-gray-500 mb-2">Creator</p>
                   <div className="flex items-center space-x-2">
-                    <div className="w-10 h-10 bg-gradient-to-br from-primary-400 to-secondary-400 rounded-full"></div>
+                    <div className="w-10 h-10 bg-linear-to-br from-primary-400 to-secondary-400 rounded-full"></div>
                     <div>
                       <p className="font-semibold">{asset.creator_name}</p>
                       <p className="text-sm text-gray-500">{formatAddress(asset.creator_address)}</p>
@@ -199,7 +197,7 @@ const AssetDetail = () => {
                 <div className="card p-4">
                   <p className="text-sm text-gray-500 mb-2">Current Owner</p>
                   <div className="flex items-center space-x-2">
-                    <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-blue-400 rounded-full"></div>
+                    <div className="w-10 h-10 bg-linear-to-br from-green-400 to-blue-400 rounded-full"></div>
                     <div>
                       <p className="font-semibold">{isOwner ? 'You' : asset.owner_name}</p>
                       <p className="text-sm text-gray-500">{formatAddress(asset.owner_address)}</p>
@@ -209,7 +207,7 @@ const AssetDetail = () => {
               </div>
 
               {/* Price & Actions */}
-              <div className="card p-6 bg-gradient-to-br from-primary-50 to-secondary-50">
+              <div className="card p-6 bg-linear-to-br from-primary-50 to-secondary-50">
                 <div className="mb-6">
                   <p className="text-sm text-gray-600 mb-2">Current Price</p>
                   <p className="text-4xl font-bold text-primary-700">{formatPrice(asset.price)}</p>
@@ -263,10 +261,6 @@ const AssetDetail = () => {
                   <div className="flex justify-between">
                     <span className="text-gray-600">Format</span>
                     <span className="font-semibold">{asset.format}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-600">Creator Royalty</span>
-                    <span className="font-semibold">{asset.royalty}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600">Created</span>
