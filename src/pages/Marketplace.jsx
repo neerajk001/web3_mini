@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import AssetCard from '../components/AssetCard';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
-import { fetchFromIPFS } from '../utils/ipfs';
+import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
 import { ethers } from 'ethers';
 import { getContractReadOnly } from '../utils/contract';
 
@@ -82,7 +82,8 @@ const Marketplace = () => {
               id: i.toString(),
               title: metadata.title || 'Untitled',
               description: metadata.description || 'No description',
-              image_url: metadata.image || metadata.image_url || '',
+              // metadata.file holds the ipfs:// URI set during upload
+              image_url: metadata.file ? getIPFSUrl(metadata.file) : '',
               price: ethers.formatEther(artwork.price),
               creator_address: artwork.creator,
               owner_address: artwork.owner,

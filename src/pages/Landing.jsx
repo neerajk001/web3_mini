@@ -4,7 +4,7 @@ import { useWallet } from '../context/WalletContext';
 import AssetCard from '../components/AssetCard';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
-import { fetchFromIPFS } from '../utils/ipfs';
+import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
 import { ethers } from 'ethers';
 import { getContractReadOnly } from '../utils/contract';
 
@@ -20,11 +20,9 @@ const Landing = () => {
         setLoading(true);
         setError(null);
 
-        // ALWAYS use the robust RPC Provider for fetching landing items independent of the user's wallet
         const rpcUrl = import.meta.env.VITE_RPC_URL || "http://127.0.0.1:8545";
         const provider = new ethers.JsonRpcProvider(rpcUrl);
-        
-        // Validate contract address is configured
+
         const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
         if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS === '0x...') {
           console.warn('Contract address not configured');
@@ -33,29 +31,22 @@ const Landing = () => {
           return;
         }
 
-        // Get ABI
-        const { abi: ABI } = await import('../abi/ArtworkRegistry.json');
-        
-        // Create contract instance with fresh provider
-        // Re-use our centralized read-only method, or just use the localized provider
         const contract = getContractReadOnly();
 
-        // Verify contract exists by checking code at address
         const code = await provider.getCode(CONTRACT_ADDRESS);
         if (code === '0x') {
-          console.error(`No contract found at address ${CONTRACT_ADDRESS}. Check your network and contract address.`);
+          console.error(`No contract found at address ${CONTRACT_ADDRESS}.`);
           setError("Contract not found on this network. Please check your network.");
           setFeaturedAssets([]);
           setLoading(false);
           return;
         }
 
-        // Fetch nextArtworkId
         let nextId;
         try {
           nextId = await contract.nextArtworkId();
         } catch (err) {
-          console.error("Contract call failed. Verify contract address and network:", err);
+          console.error("Contract call failed:", err);
           setError("Contract is not responding. Check your network connection.");
           setFeaturedAssets([]);
           setLoading(false);
@@ -71,7 +62,6 @@ const Landing = () => {
         }
 
         const assets = [];
-        // Fetch last 3 created artworks for the landing page
         const limit = Math.min(totalArtworks, 3);
         let failedCount = 0;
 
@@ -81,30 +71,28 @@ const Landing = () => {
 
           try {
             const artwork = await contract.artworks(artworkId);
-            
-            // Check if metadataCID exists
+
             if (!artwork.metadataCID) {
               console.warn(`Artwork ${artworkId} has no metadata CID`);
               continue;
             }
 
-            // Fetch metadata with retries
             const metadata = await fetchFromIPFS(artwork.metadataCID);
 
             assets.push({
               id: artworkId.toString(),
               title: metadata.title || 'Untitled',
               description: metadata.description || 'No description',
-              image_url: metadata.image || metadata.image_url || '',
+              // metadata.file holds the ipfs:// URI set during upload
+              image_url: metadata.file ? getIPFSUrl(metadata.file) : '',
               price: ethers.formatEther(artwork.price),
               creator_address: artwork.creator,
               owner_address: artwork.owner,
-              type: artwork.itemType === 0 ? 'painting' : 'research-paper',
+              type: Number(artwork.itemType) === 0 ? 'painting' : 'research-paper',
             });
           } catch (err) {
             console.error(`Failed to fetch artwork ${artworkId}:`, err);
             failedCount++;
-            // Continue to next artwork instead of breaking
             continue;
           }
         }
@@ -177,7 +165,6 @@ const Landing = () => {
           </div>
         </div>
 
-        {/* Bottom gradient fade */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-linear-to-t from-black to-transparent"></div>
       </section>
 
@@ -303,9 +290,9 @@ const Landing = () => {
             <p className="text-xl mb-8 text-primary-100">
               Connect your wallet and join thousands of creators and collectors
             </p>
-            <Button 
-              size="lg" 
-              variant="secondary" 
+            <Button
+              size="lg"
+              variant="secondary"
               className="bg-white text-primary-700 hover:bg-gray-100"
             >
               Connect Wallet Now

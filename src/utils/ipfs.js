@@ -3,19 +3,18 @@
 export const getIPFSUrl = (cid) => {
   if (!cid) return '';
   
-  // If it's already a full URL, return it
   if (cid.startsWith('http')) return cid;
-  
-  // Use a reliable public gateway
-  return `https://cloudflare-ipfs.com/ipfs/${cid.replace('ipfs://', '')}`;
+
+  // ipfs.io is reliable for image display (no CORS enforcement on <img> tags)
+  return `https://ipfs.io/ipfs/${cid.replace('ipfs://', '')}`;
 };
 
-// A list of public IPFS gateways to try in order
+// CORS-safe gateways first — gateway.pinata.cloud blocks cross-origin fetch()
 export const IPFS_GATEWAYS = [
   'https://ipfs.io/ipfs/',
-  'https://dweb.link/ipfs/',
+  // 'https://dweb.link/ipfs/',
+  // 'https://w3s.link/ipfs/',
   'https://gateway.pinata.cloud/ipfs/',
-  'https://cloudflare-ipfs.com/ipfs/'
 ];
 
 // Fetch JSON from IPFS with fallback to multiple gateways
@@ -26,8 +25,6 @@ export const fetchFromIPFS = async (cid) => {
   for (const gateway of IPFS_GATEWAYS) {
     try {
       const url = `${gateway}${normalizedCID}`;
-      // Do not pass Accept headers - it forces a CORS preflight OPTIONS request
-      // which fails heavily on rate-limited public gateways.
       const response = await fetch(url);
 
       if (response.ok) {
