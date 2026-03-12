@@ -4,6 +4,7 @@ import { ethers } from 'ethers';
 import { formatPrice, getAssetTypeIcon } from '../utils/helpers';
 import { useWallet } from '../context/WalletContext';
 import { getContract } from '../utils/contract';
+import PdfPreview from './PdfPreview';
 
 const AssetCard = ({ asset, showOwner = false }) => {
   const {
@@ -68,11 +69,18 @@ const AssetCard = ({ asset, showOwner = false }) => {
       <Link to={`/asset/${id}`} className="block">
         {/* Image */}
         <div className="relative h-64 bg-black overflow-hidden">
-          <img
-            src={image_url || 'https://via.placeholder.com/400x300?text=NFT'}
-            alt={title}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
-          />
+          {isPaper ? (
+            <PdfPreview
+              url={image_url}
+              className="w-full h-full"
+            />
+          ) : (
+            <img
+              src={image_url || 'https://via.placeholder.com/400x300?text=NFT'}
+              alt={title}
+              className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-300"
+            />
+          )}
 
           {/* Type Badge */}
           <div className="absolute top-3 left-3 bg-black/70 backdrop-blur-sm px-3 py-1 rounded-full text-sm font-medium flex items-center space-x-1 text-white border border-white/10">
@@ -128,7 +136,7 @@ const AssetCard = ({ asset, showOwner = false }) => {
           <button
             onClick={handleRent}
             disabled={txLoading}
-            className="w-full bg-gradient-to-r from-violet-600 to-purple-700 hover:from-violet-700 hover:to-purple-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-500/30 text-sm"
+            className="w-full bg-linear-to-r from-violet-600 to-purple-700 hover:from-violet-700 hover:to-purple-800 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-purple-500/30 text-sm"
           >
             {txLoading ? (
               <>
@@ -151,7 +159,7 @@ const AssetCard = ({ asset, showOwner = false }) => {
           <button
             onClick={handleBuy}
             disabled={txLoading}
-            className="w-full bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-cyan-500/30 text-sm"
+            className="w-full bg-linear-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg shadow-cyan-500/30 text-sm"
           >
             {txLoading ? (
               <>

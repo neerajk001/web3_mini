@@ -8,6 +8,7 @@ import Loading from '../components/Loading';
 import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
 import { ethers } from 'ethers';
 import { getContractReadOnly } from '../utils/contract';
+import PdfPreview from '../components/PdfPreview';
 
 const AssetDetail = () => {
   const { id } = useParams();
@@ -149,11 +150,18 @@ const AssetDetail = () => {
           {/* Left: Image */}
           <div>
             <div className="card sticky top-24">
-              <img
-                src={asset.image_url}
-                alt={asset.title}
-                className="w-full h-auto rounded-xl"
-              />
+              {asset.type === 'research-paper' ? (
+                <PdfPreview
+                  url={asset.image_url}
+                  className="w-full rounded-xl overflow-hidden min-h-64"
+                />
+              ) : (
+                <img
+                  src={asset.image_url}
+                  alt={asset.title}
+                  className="w-full h-auto rounded-xl"
+                />
+              )}
 
               {/* Asset Badges */}
               <div className="flex items-center gap-2 mt-4">
