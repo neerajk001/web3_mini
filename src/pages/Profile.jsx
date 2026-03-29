@@ -18,6 +18,7 @@ const Profile = () => {
   const [loading, setLoading] = useState(true);
   const [ownedAssets, setOwnedAssets] = useState([]);
   const [listedAssets, setListedAssets] = useState([]);
+  const [leasedAssets, setLeasedAssets] = useState([]);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -32,67 +33,59 @@ const Profile = () => {
         setError(null);
 
         const contract = getContractReadOnly();
+        const normalizeAsset = async (id, enforceViewerAsOwner = false) => {
+          try {
+            const details = await contract.getArtworkDetails(id);
+
+            const metadataCID = details[0];
+            const itemType = details[1];
+            const owner = details[2];
+            const creator = details[3];
+            const createdAt = details[4];
+            const price = details[5];
+
+            let metadata = {};
+            try {
+              metadata = await fetchFromIPFS(metadataCID);
+            } catch (ipfsError) {
+              console.error(`Failed to fetch metadata for artwork ${id}:`, ipfsError);
+              metadata = {
+                title: `Artwork #${id.toString()}`,
+                description: 'Metadata unavailable',
+                file: '',
+                category: 'Unknown',
+              };
+            }
+
+            return {
+              id: id.toString(),
+              title: metadata.title || `Artwork #${id.toString()}`,
+              description: metadata.description || 'No description',
+              type: Number(itemType) === 0 ? 'painting' : 'research-paper',
+              price: ethers.formatEther(price),
+              image_url: metadata.file ? getIPFSUrl(metadata.file) : '/placeholder.png',
+              creator_name: creator.substring(0, 6) + '...',
+              creator_address: creator,
+              owner_address: enforceViewerAsOwner ? address : owner,
+              actual_owner_address: owner,
+              created_at: new Date(Number(createdAt) * 1000).toISOString(),
+              verified: true,
+              category: metadata.category || 'Art',
+            };
+          } catch (itemError) {
+            console.error(`Error fetching artwork ${id.toString()}:`, itemError);
+            return null;
+          }
+        };
 
         // 1️⃣ Get artwork IDs owned by this wallet
-        const artworkIds = await contract.getArtworksByOwner(address);
+        const [artworkIds, nextId] = await Promise.all([
+          contract.getArtworksByOwner(address),
+          contract.nextArtworkId(),
+        ]);
         console.log('Artwork IDs:', artworkIds);
 
-        if (artworkIds.length === 0) {
-          setOwnedAssets([]);
-          setListedAssets([]);
-          return;
-        }
-
-        const assets = await Promise.all(
-          artworkIds.map(async (id) => {
-            try {
-              // 2️⃣ Get on-chain details
-              const details = await contract.getArtworkDetails(id);
-
-              const metadataCID = details[0];
-              const itemType = details[1];
-              const owner = details[2];
-              const creator = details[3];
-              const createdAt = details[4];
-              const price = details[5];
-
-              console.log(`Fetching metadata for artwork ${id.toString()}:`, metadataCID);
-
-              // 3️⃣ Fetch metadata from IPFS with fallback gateways
-              let metadata = {};
-              try {
-                metadata = await fetchFromIPFS(metadataCID);
-              } catch (ipfsError) {
-                console.error(`Failed to fetch metadata for artwork ${id}:`, ipfsError);
-                // Continue with default metadata if IPFS fetch fails
-                metadata = {
-                  title: `Artwork #${id.toString()}`,
-                  description: 'Metadata unavailable',
-                  file: '',
-                  category: 'Unknown',
-                };
-              }
-
-              return {
-                id: id.toString(),
-                title: metadata.title || `Artwork #${id.toString()}`,
-                description: metadata.description || 'No description',
-                type: itemType === 0 ? 'painting' : 'research-paper',
-                price: ethers.formatEther(price),
-                image_url: metadata.file ? getIPFSUrl(metadata.file) : '/placeholder.png',
-                creator_name: creator.substring(0, 6) + '...',
-                creator_address: creator,
-                owner_address: owner,
-                created_at: new Date(Number(createdAt) * 1000).toISOString(),
-                verified: true,
-                category: metadata.category || 'Art',
-              };
-            } catch (itemError) {
-              console.error(`Error fetching artwork ${id.toString()}:`, itemError);
-              return null;
-            }
-          })
-        );
+        const assets = await Promise.all(artworkIds.map((id) => normalizeAsset(id)));
 
         // Filter out failed items
         const validAssets = assets.filter((asset) => asset !== null);
@@ -104,6 +97,42 @@ const Profile = () => {
             asset.creator_address.toLowerCase() === address.toLowerCase()
         );
         setListedAssets(listed);
+
+        // 2️⃣ Find active research paper leases for this wallet
+        const totalArtworks = Number(nextId);
+        if (totalArtworks === 0) {
+          setLeasedAssets([]);
+          return;
+        }
+
+        const allIds = Array.from({ length: totalArtworks }, (_, idx) => idx);
+        const leasedPaperIds = await Promise.all(
+          allIds.map(async (artworkId) => {
+            try {
+              const art = await contract.artworks(artworkId);
+              if (Number(art.itemType) !== 1) return null;
+
+              const hasAccess = await contract.hasPaperAccess(artworkId, address);
+              return hasAccess ? artworkId : null;
+            } catch (leaseCheckError) {
+              console.error(`Lease access check failed for artwork ${artworkId}:`, leaseCheckError);
+              return null;
+            }
+          })
+        );
+
+        const activeLeasedIds = leasedPaperIds.filter((id) => id !== null);
+
+        if (activeLeasedIds.length === 0) {
+          setLeasedAssets([]);
+          return;
+        }
+
+        const leased = await Promise.all(
+          activeLeasedIds.map((leaseId) => normalizeAsset(leaseId, true))
+        );
+
+        setLeasedAssets(leased.filter((asset) => asset !== null));
 
       } catch (error) {
         console.error('Error fetching NFTs:', error);
@@ -168,6 +197,7 @@ const Profile = () => {
     },
     { label: 'Owned NFTs', value: ownedAssets.length, icon: '🖼️' },
     { label: 'Listed Items', value: listedAssets.length, icon: '📋' },
+    { label: 'Active Leases', value: leasedAssets.length, icon: '📄' },
     { label: 'Total Transactions', value: mockTransactions.length, icon: '📊' },
   ];
 
@@ -186,7 +216,7 @@ const Profile = () => {
         <div className="card p-8 mb-8">
           <div className="flex flex-col md:flex-row items-center md:items-start space-y-4 md:space-y-0 md:space-x-6">
             {/* Avatar */}
-            <div className="w-24 h-24 bg-gradient-to-br from-primary-500 to-secondary-500 rounded-full flex items-center justify-center text-white text-4xl font-bold">
+            <div className="w-24 h-24 bg-linear-to-br from-primary-500 to-secondary-500 rounded-full flex items-center justify-center text-white text-4xl font-bold">
               {address?.substring(2, 4).toUpperCase()}
             </div>
 
@@ -227,7 +257,7 @@ const Profile = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           {stats.map((stat, index) => (
             <div key={index} className="card p-6">
               <div className="flex items-center justify-between mb-2">
@@ -274,6 +304,16 @@ const Profile = () => {
                 }`}
               >
                 Transactions ({mockTransactions.length})
+              </button>
+              <button
+                onClick={() => setActiveTab('leased')}
+                className={`pb-4 px-1 border-b-2 font-semibold transition-colors ${
+                  activeTab === 'leased'
+                    ? 'border-primary-600 text-primary-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Leased Papers ({leasedAssets.length})
               </button>
             </div>
           </div>
@@ -417,6 +457,32 @@ const Profile = () => {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Leased Papers */}
+            {activeTab === 'leased' && (
+              <div>
+                {leasedAssets.length === 0 ? (
+                  <div className="text-center py-16">
+                    <div className="text-6xl mb-4">📄</div>
+                    <h3 className="text-2xl font-bold text-gray-700 mb-2">
+                      No active paper leases
+                    </h3>
+                    <p className="text-gray-600 mb-6">
+                      Lease a research paper to get 30-day full access
+                    </p>
+                    <Button onClick={() => navigate('/marketplace?type=research-paper')}>
+                      Browse Papers
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                    {leasedAssets.map((asset) => (
+                      <AssetCard key={asset.id} asset={asset} />
+                    ))}
                   </div>
                 )}
               </div>

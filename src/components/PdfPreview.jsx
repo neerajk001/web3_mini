@@ -7,44 +7,79 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   import.meta.url
 ).toString();
 
-const PdfPreview = ({ url, className = '' }) => {
+const PdfPreview = ({ url, className = '', renderAllPages = false }) => {
   const canvasRef = useRef(null);
+  const pagesContainerRef = useRef(null);
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!url) return;
+    if (!url) {
+      setLoading(false);
+      setError(true);
+      return;
+    }
 
     let cancelled = false;
+    let loadingTask = null;
 
     const render = async () => {
       try {
         setLoading(true);
         setError(false);
 
-        const loadingTask = pdfjsLib.getDocument(url);
+        loadingTask = pdfjsLib.getDocument(url);
         const pdf = await loadingTask.promise;
-        const page = await pdf.getPage(1);
 
         if (cancelled) return;
 
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+        if (renderAllPages) {
+          const container = pagesContainerRef.current;
+          if (!container) return;
 
-        const viewport = page.getViewport({ scale: 1 });
-        // Scale to fill the canvas width nicely
-        const scale = canvas.offsetWidth > 0
-          ? canvas.offsetWidth / viewport.width
-          : 400 / viewport.width;
+          container.innerHTML = '';
 
-        const scaledViewport = page.getViewport({ scale });
-        canvas.width = scaledViewport.width;
-        canvas.height = scaledViewport.height;
+          for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+            if (cancelled) return;
 
-        await page.render({
-          canvasContext: canvas.getContext('2d'),
-          viewport: scaledViewport,
-        }).promise;
+            const page = await pdf.getPage(pageNumber);
+            const canvas = document.createElement('canvas');
+            canvas.className = 'w-full h-auto rounded-lg';
+
+            const baseViewport = page.getViewport({ scale: 1 });
+            const targetWidth = container.clientWidth > 0 ? container.clientWidth : 700;
+            const scale = targetWidth / baseViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+
+            container.appendChild(canvas);
+
+            await page.render({
+              canvasContext: canvas.getContext('2d'),
+              viewport,
+            }).promise;
+          }
+        } else {
+          const page = await pdf.getPage(1);
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+
+          const viewport = page.getViewport({ scale: 1 });
+          const scale = canvas.offsetWidth > 0
+            ? canvas.offsetWidth / viewport.width
+            : 400 / viewport.width;
+
+          const scaledViewport = page.getViewport({ scale });
+          canvas.width = scaledViewport.width;
+          canvas.height = scaledViewport.height;
+
+          await page.render({
+            canvasContext: canvas.getContext('2d'),
+            viewport: scaledViewport,
+          }).promise;
+        }
       } catch (err) {
         if (!cancelled) {
           console.error('PDF preview failed:', err);
@@ -57,8 +92,13 @@ const PdfPreview = ({ url, className = '' }) => {
 
     render();
 
-    return () => { cancelled = true; };
-  }, [url]);
+    return () => {
+      cancelled = true;
+      if (loadingTask) {
+        loadingTask.destroy();
+      }
+    };
+  }, [url, renderAllPages]);
 
   if (error) {
     return (
@@ -82,11 +122,19 @@ const PdfPreview = ({ url, className = '' }) => {
           </svg>
         </div>
       )}
-      <canvas
-        ref={canvasRef}
-        className="w-full h-full object-cover"
-        style={{ display: loading ? 'none' : 'block' }}
-      />
+      {renderAllPages ? (
+        <div
+          ref={pagesContainerRef}
+          className="space-y-4"
+          style={{ display: loading ? 'none' : 'block' }}
+        />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          className="w-full h-full object-cover"
+          style={{ display: loading ? 'none' : 'block' }}
+        />
+      )}
     </div>
   );
 };

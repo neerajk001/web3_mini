@@ -7,7 +7,7 @@ import Modal from '../components/Modal';
 import Loading from '../components/Loading';
 import { fetchFromIPFS, getIPFSUrl } from '../utils/ipfs';
 import { ethers } from 'ethers';
-import { getContractReadOnly } from '../utils/contract';
+import { getContract, getContractReadOnly } from '../utils/contract';
 import PdfPreview from '../components/PdfPreview';
 
 const AssetDetail = () => {
@@ -20,6 +20,8 @@ const AssetDetail = () => {
   const [showRentModal, setShowRentModal] = useState(false);
   const [transactionLoading, setTransactionLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [hasPaperAccess, setHasPaperAccess] = useState(false);
+  const [checkingPaperAccess, setCheckingPaperAccess] = useState(false);
 
   useEffect(() => {
     const fetchAsset = async () => {
@@ -36,6 +38,21 @@ const AssetDetail = () => {
         const creator = details[3];
         const createdAt = details[4];
         const price = details[5];
+        const isResearchPaper = Number(itemType) === 1;
+
+        if (isResearchPaper) {
+          setCheckingPaperAccess(true);
+          if (connected && address) {
+            const access = await contract.hasPaperAccess(id, address);
+            setHasPaperAccess(access);
+          } else {
+            setHasPaperAccess(false);
+          }
+          setCheckingPaperAccess(false);
+        } else {
+          setHasPaperAccess(false);
+          setCheckingPaperAccess(false);
+        }
 
         let metadata = {};
         try {
@@ -68,13 +85,14 @@ const AssetDetail = () => {
       } catch (error) {
         console.error(error);
         setError('Failed to load asset details');
+        setCheckingPaperAccess(false);
       } finally {
         setLoading(false);
       }
     };
 
     fetchAsset();
-  }, [id]);
+  }, [id, connected, address]);
 
   const handleBuy = async () => {
     if (!connected) {
@@ -104,12 +122,15 @@ const AssetDetail = () => {
 
     try {
       setTransactionLoading(true);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const contract = await getContract();
+      const tx = await contract.leasePaper(id, { value: ethers.parseEther(asset.price) });
+      await tx.wait();
       alert('Rental successful! You can now access this asset.');
+      setHasPaperAccess(true);
       setShowRentModal(false);
     } catch (error) {
       console.error('Rental failed:', error);
-      alert('Transaction failed. Please try again.');
+      alert(error?.reason || error?.message || 'Transaction failed. Please try again.');
     } finally {
       setTransactionLoading(false);
     }
@@ -131,6 +152,8 @@ const AssetDetail = () => {
   }
 
   const isOwner = connected && address?.toLowerCase() === asset.owner_address?.toLowerCase();
+  const isResearchPaper = asset.type === 'research-paper';
+  const canViewResearchPaper = isResearchPaper && connected && hasPaperAccess;
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -151,10 +174,24 @@ const AssetDetail = () => {
           <div>
             <div className="card sticky top-24">
               {asset.type === 'research-paper' ? (
-                <PdfPreview
-                  url={asset.image_url}
-                  className="w-full rounded-xl overflow-hidden min-h-64"
-                />
+                checkingPaperAccess ? (
+                  <div className="w-full rounded-xl min-h-64 bg-gray-900 flex items-center justify-center text-gray-300">
+                    Checking access...
+                  </div>
+                ) : canViewResearchPaper ? (
+                  <PdfPreview
+                    url={asset.image_url}
+                    className="w-full rounded-xl overflow-hidden p-4 bg-gray-900"
+                    renderAllPages={true}
+                  />
+                ) : (
+                  <div className="w-full rounded-xl min-h-64 bg-gray-900 text-gray-300 flex flex-col items-center justify-center p-6 text-center">
+                    <p className="font-semibold mb-2">Private Research Paper</p>
+                    <p className="text-sm text-gray-400">
+                      Only wallets with an active 30-day lease can view the full PDF.
+                    </p>
+                  </div>
+                )
               ) : (
                 <img
                   src={asset.image_url}
@@ -223,23 +260,30 @@ const AssetDetail = () => {
 
                 {!isOwner && (
                   <div className="space-y-3">
-                    <Button
-                      fullWidth
-                      size="lg"
-                      onClick={() => setShowBuyModal(true)}
-                      disabled={!connected}
-                    >
-                      {connected ? 'Buy Now' : 'Connect Wallet to Buy'}
-                    </Button>
-                    <Button
-                      fullWidth
-                      size="lg"
-                      variant="outline"
-                      onClick={() => setShowRentModal(true)}
-                      disabled={!connected}
-                    >
-                      {connected ? `Rent for ${formatPrice(asset.rentPrice)}` : 'Connect Wallet to Rent'}
-                    </Button>
+                    {asset.type === 'painting' ? (
+                      <Button
+                        fullWidth
+                        size="lg"
+                        onClick={() => setShowBuyModal(true)}
+                        disabled={!connected}
+                      >
+                        {connected ? 'Buy Now' : 'Connect Wallet to Buy'}
+                      </Button>
+                    ) : (
+                      <Button
+                        fullWidth
+                        size="lg"
+                        variant="outline"
+                        onClick={() => setShowRentModal(true)}
+                        disabled={!connected || hasPaperAccess}
+                      >
+                        {!connected
+                          ? 'Connect Wallet to Rent'
+                          : hasPaperAccess
+                          ? 'Lease Active (Viewing Enabled)'
+                          : `Rent for ${formatPrice(asset.rentPrice)}`}
+                      </Button>
+                    )}
                   </div>
                 )}
 
@@ -306,7 +350,7 @@ const AssetDetail = () => {
       </div>
 
       {/* Buy Modal */}
-      <Modal isOpen={showBuyModal} onClose={() => setShowBuyModal(false)} title="Confirm Purchase">
+      <Modal isOpen={showBuyModal && asset.type === 'painting'} onClose={() => setShowBuyModal(false)} title="Confirm Purchase">
         <div className="space-y-6">
           <div className="bg-gray-50 p-4 rounded-lg">
             <h4 className="font-semibold mb-2">{asset.title}</h4>
@@ -336,7 +380,7 @@ const AssetDetail = () => {
       </Modal>
 
       {/* Rent Modal */}
-      <Modal isOpen={showRentModal} onClose={() => setShowRentModal(false)} title="Rent Asset">
+      <Modal isOpen={showRentModal && asset.type === 'research-paper'} onClose={() => setShowRentModal(false)} title="Rent Asset">
         <div className="space-y-6">
           <div className="bg-gray-50 p-4 rounded-lg">
             <h4 className="font-semibold mb-2">{asset.title}</h4>
