@@ -22,6 +22,7 @@ const AssetDetail = () => {
   const [error, setError] = useState(null);
   const [hasPaperAccess, setHasPaperAccess] = useState(false);
   const [checkingPaperAccess, setCheckingPaperAccess] = useState(false);
+  const [daysRemaining, setDaysRemaining] = useState(0);
 
   useEffect(() => {
     const fetchAsset = async () => {
@@ -45,12 +46,23 @@ const AssetDetail = () => {
           if (connected && address) {
             const access = await contract.hasPaperAccess(id, address);
             setHasPaperAccess(access);
+            
+            // Fetch lease expiry to calculate days remaining
+            if (access) {
+              const expiryTimestamp = await contract.paperAccess(id, address);
+              const now = Math.floor(Date.now() / 1000);
+              const secondsRemaining = Number(expiryTimestamp) - now;
+              const days = Math.ceil(secondsRemaining / (24 * 60 * 60));
+              setDaysRemaining(Math.max(0, days));
+            }
           } else {
             setHasPaperAccess(false);
+            setDaysRemaining(0);
           }
           setCheckingPaperAccess(false);
         } else {
           setHasPaperAccess(false);
+          setDaysRemaining(0);
           setCheckingPaperAccess(false);
         }
 
@@ -127,6 +139,7 @@ const AssetDetail = () => {
       await tx.wait();
       alert('Rental successful! You can now access this asset.');
       setHasPaperAccess(true);
+      setDaysRemaining(30);
       setShowRentModal(false);
     } catch (error) {
       console.error('Rental failed:', error);
@@ -152,8 +165,9 @@ const AssetDetail = () => {
   }
 
   const isOwner = connected && address?.toLowerCase() === asset.owner_address?.toLowerCase();
+  const isCreator = connected && address?.toLowerCase() === asset.creator_address?.toLowerCase();
   const isResearchPaper = asset.type === 'research-paper';
-  const canViewResearchPaper = isResearchPaper && connected && hasPaperAccess;
+  const canViewResearchPaper = isResearchPaper && connected && (hasPaperAccess || isCreator);
 
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -188,7 +202,7 @@ const AssetDetail = () => {
                   <div className="w-full rounded-xl min-h-64 bg-gray-900 text-gray-300 flex flex-col items-center justify-center p-6 text-center">
                     <p className="font-semibold mb-2">Private Research Paper</p>
                     <p className="text-sm text-gray-400">
-                      Only wallets with an active 30-day lease can view the full PDF.
+                      {isCreator ? 'You can always view your own research paper.' : 'Only wallets with an active 30-day lease can view the full PDF.'}
                     </p>
                   </div>
                 )
@@ -275,10 +289,12 @@ const AssetDetail = () => {
                         size="lg"
                         variant="outline"
                         onClick={() => setShowRentModal(true)}
-                        disabled={!connected || hasPaperAccess}
+                        disabled={!connected || hasPaperAccess || isCreator || isOwner}
                       >
                         {!connected
                           ? 'Connect Wallet to Rent'
+                          : isCreator || isOwner
+                          ? 'You have access to view this paper'
                           : hasPaperAccess
                           ? 'Lease Active (Viewing Enabled)'
                           : `Rent for ${formatPrice(asset.rentPrice)}`}
@@ -290,6 +306,12 @@ const AssetDetail = () => {
                 {isOwner && (
                   <div className="bg-green-100 text-green-800 p-4 rounded-lg text-center font-semibold">
                     ✓ You own this NFT
+                  </div>
+                )}
+
+                {hasPaperAccess && !isOwner && !isCreator && (
+                  <div className="bg-blue-100 text-blue-800 p-4 rounded-lg text-center font-semibold">
+                    ⏱️ {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} remaining
                   </div>
                 )}
               </div>

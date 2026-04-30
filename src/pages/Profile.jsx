@@ -33,7 +33,7 @@ const Profile = () => {
         setError(null);
 
         const contract = getContractReadOnly();
-        const normalizeAsset = async (id, enforceViewerAsOwner = false) => {
+        const normalizeAsset = async (id, enforceViewerAsOwner = false, fetchLeaseInfo = false) => {
           try {
             const details = await contract.getArtworkDetails(id);
 
@@ -57,6 +57,14 @@ const Profile = () => {
               };
             }
 
+            let daysRemaining = 0;
+            if (fetchLeaseInfo) {
+              const expiryTimestamp = await contract.paperAccess(id, address);
+              const now = Math.floor(Date.now() / 1000);
+              const secondsRemaining = Number(expiryTimestamp) - now;
+              daysRemaining = Math.ceil(secondsRemaining / (24 * 60 * 60));
+            }
+
             return {
               id: id.toString(),
               title: metadata.title || `Artwork #${id.toString()}`,
@@ -71,6 +79,7 @@ const Profile = () => {
               created_at: new Date(Number(createdAt) * 1000).toISOString(),
               verified: true,
               category: metadata.category || 'Art',
+              daysRemaining: daysRemaining,
             };
           } catch (itemError) {
             console.error(`Error fetching artwork ${id.toString()}:`, itemError);
@@ -129,7 +138,7 @@ const Profile = () => {
         }
 
         const leased = await Promise.all(
-          activeLeasedIds.map((leaseId) => normalizeAsset(leaseId, true))
+          activeLeasedIds.map((leaseId) => normalizeAsset(leaseId, true, true))
         );
 
         setLeasedAssets(leased.filter((asset) => asset !== null));

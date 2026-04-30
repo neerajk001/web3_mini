@@ -17,6 +17,7 @@ const AssetCard = ({ asset, showOwner = false }) => {
     creator_name,
     owner_address,
     verified = false,
+    daysRemaining = 0,
   } = asset;
 
   const { connected, address } = useWallet();
@@ -25,6 +26,7 @@ const AssetCard = ({ asset, showOwner = false }) => {
 
   const isPaper = type === 'research-paper';
   const isOwner = connected && address?.toLowerCase() === owner_address?.toLowerCase();
+  const isLeased = daysRemaining > 0;
 
   const handleBuy = async (e) => {
     e.preventDefault();
@@ -128,7 +130,11 @@ const AssetCard = ({ asset, showOwner = false }) => {
 
       {/* Action Button — outside Link to avoid nested anchor */}
       <div className="px-5 pb-5 pt-1">
-        {isOwner ? (
+        {isLeased ? (
+          <div className="w-full bg-blue-500/10 border border-blue-500/30 text-blue-400 text-sm font-semibold py-2.5 rounded-xl text-center">
+            ⏱️ {daysRemaining} day{daysRemaining !== 1 ? 's' : ''} left
+          </div>
+        ) : isOwner ? (
           <div className="w-full bg-green-500/10 border border-green-500/30 text-green-400 text-sm font-semibold py-2.5 rounded-xl text-center">
             ✓ You own this
           </div>

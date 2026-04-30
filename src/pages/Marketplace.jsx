@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useWallet } from '../context/WalletContext';
 import AssetCard from '../components/AssetCard';
 import Button from '../components/Button';
 import Loading from '../components/Loading';
@@ -8,6 +9,7 @@ import { ethers } from 'ethers';
 import { getContractReadOnly } from '../utils/contract';
 
 const Marketplace = () => {
+  const { connected, address } = useWallet();
   const [searchParams, setSearchParams] = useSearchParams();
   const [assets, setAssets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,18 @@ const Marketplace = () => {
 
             const metadata = await fetchFromIPFS(artwork.metadataCID);
 
+            let daysRemaining = 0;
+            // Check if current user has an active lease on this research paper
+            if (Number(artwork.itemType) === 1 && connected && address) {
+              const hasAccess = await contract.hasPaperAccess(i, address);
+              if (hasAccess) {
+                const expiryTimestamp = await contract.paperAccess(i, address);
+                const now = Math.floor(Date.now() / 1000);
+                const secondsRemaining = Number(expiryTimestamp) - now;
+                daysRemaining = Math.ceil(secondsRemaining / (24 * 60 * 60));
+              }
+            }
+
             loadedAssets.push({
               id: i.toString(),
               title: metadata.title || 'Untitled',
@@ -89,6 +103,7 @@ const Marketplace = () => {
               owner_address: artwork.owner,
               isListed: artwork.isListed,
               type: Number(artwork.itemType) === 0 ? 'painting' : 'research-paper',
+              daysRemaining: daysRemaining,
             });
           } catch (err) {
             console.error(`Failed to fetch artwork ${i}:`, err);
@@ -106,7 +121,7 @@ const Marketplace = () => {
     };
 
     fetchAssets();
-  }, []);
+  }, [connected, address]);
 
   const filteredAssets = assets.filter(asset => {
     const matchesSearch = asset.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
